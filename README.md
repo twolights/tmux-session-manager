@@ -6,15 +6,17 @@ A CLI tool for managing tmux-based development workspaces, designed for develope
 
 Each project gets a tmux session with:
 - **Two-pane layout**: neovim (left, 60%) + Claude Code (right, 40%)
-- **Background servers**: dev servers, databases, watchers running in popup windows
-- **Quick switching**: keyboard shortcuts to jump between projects
+- **Background servers**: dev servers, databases, watchers in a dedicated window
+- **Quick switching**: fzf-powered popup to jump between projects
+- **Attention notifications**: visual bell when Claude Code needs input
 
 ## Prerequisites
 
 - tmux 3.2+ (for popup window support)
 - neovim
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)
-- [yq](https://github.com/mikefarah/yq) (YAML parser)
+- [yq](https://kislyuk.github.io/yq/) (Python-based YAML/jq wrapper: `pip install yq`)
+- [fzf](https://github.com/junegunn/fzf) (fuzzy finder for session switching)
 
 ## Installation
 
@@ -31,13 +33,9 @@ cp /path/to/claude-code-tmux-manager/config/projects.example.yml \
    ~/.config/tmux-session-manager/projects.yml
 
 # 4. Edit projects.yml with your projects (see Configuration below)
-
-# 5. Source tmux key bindings in your ~/.tmux.conf
-source-file "/path/to/claude-code-tmux-manager/tmux/bindings.conf"
-
-# 6. Reload tmux
-tmux source-file ~/.tmux.conf
 ```
+
+Key bindings are loaded automatically when you run `tms start` -- no `.tmux.conf` modification needed. Bindings only activate in tms-managed sessions.
 
 ## Usage
 
@@ -52,12 +50,26 @@ tms help               # Show usage
 
 ### Tmux key bindings
 
-| Binding      | Action                                   |
-|--------------|------------------------------------------|
-| `prefix + P` | Switch between projects (session chooser) |
-| `prefix + S` | Toggle server popup window               |
-| `ctrl-z`     | Suspend neovim to drop to shell          |
-| `fg`         | Resume neovim                            |
+These bindings are auto-loaded and only active in tms sessions:
+
+| Binding      | Action                                          |
+|--------------|--------------------------------------------------|
+| `prefix + P` | Switch between tms projects (fzf popup)          |
+| `prefix + S` | Toggle between workspace and server logs window  |
+| `ctrl-z`     | Suspend neovim to drop to shell                  |
+| `fg`         | Resume neovim                                    |
+
+### Session layout
+
+```
+Window 0: _servers (background processes, if configured)
+Window 1: workspace
+  ┌──────────────────────┬───────────────────┐
+  │                      │                   │
+  │     neovim (60%)     │  Claude Code (40%)│
+  │                      │                   │
+  └──────────────────────┴───────────────────┘
+```
 
 ### Example workflow
 
@@ -65,12 +77,14 @@ tms help               # Show usage
 # Start working on a project
 $ tms start my-webapp
 # -> neovim + Claude Code are ready in a split layout
+# -> Claude Code resumes your last session (--continue)
 
 # Inside tmux, switch to another project
-# prefix + P -> select from list
+# prefix + P -> fzf popup with tms sessions only
 
 # View server output (dev server, database, etc.)
-# prefix + S -> popup appears; press Escape to dismiss
+# prefix + S -> switches to _servers window
+# prefix + S -> switches back to workspace
 
 # Done for the day
 $ tms stop my-webapp
