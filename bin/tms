@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# tms — tmux session manager for Claude Code & neovim workspaces
+set -euo pipefail
+
+# Resolve script directory to find lib/
+TMS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Source library modules
+source "$TMS_DIR/lib/utils.sh"
+source "$TMS_DIR/lib/config.sh"
+source "$TMS_DIR/lib/session.sh"
+source "$TMS_DIR/lib/servers.sh"
+
+# Check dependencies
+require_cmd tmux
+require_cmd yq
+
+# Check tmux version (3.2+ required for display-popup)
+_check_tmux_version() {
+    local version
+    version=$(tmux -V | sed 's/[^0-9.]//g')
+    local major minor
+    major=$(echo "$version" | cut -d. -f1)
+    minor=$(echo "$version" | cut -d. -f2)
+    if [[ "$major" -lt 3 ]] || { [[ "$major" -eq 3 ]] && [[ "$minor" -lt 2 ]]; }; then
+        warn "tmux $version detected; version 3.2+ recommended for popup support"
+    fi
+}
+
+_check_tmux_version
+
+usage() {
+    cat <<'USAGE'
+tms — tmux session manager
+
+Usage:
+  tms start <project>    Launch or attach to a project workspace
+  tms stop <project>     Stop a project session
+  tms list               List all projects and their status
+  tms help               Show this help message
+
+Options:
+  -h, --help             Show this help message
+USAGE
+}
+
+# Main command dispatch
+cmd="${1:-}"
+shift || true
+
+case "$cmd" in
+    start)
+        [[ -z "${1:-}" ]] && die "usage: tms start <project-name>"
+        config_load
+        cmd_start "$1"
+        ;;
+    stop)
+        [[ -z "${1:-}" ]] && die "usage: tms stop <project-name>"
+        config_load
+        cmd_stop "$1"
+        ;;
+    list)
+        config_load
+        cmd_list
+        ;;
+    help|-h|--help)
+        usage
+        ;;
+    "")
+        usage
+        exit 1
+        ;;
+    *)
+        die "unknown command '$cmd'. Run 'tms help' for usage."
+        ;;
+esac

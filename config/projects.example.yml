@@ -1,0 +1,34 @@
+# tmux-session-manager project configuration
+#
+# Each project defines a workspace that tms can launch.
+#
+# Required fields:
+#   name  — Unique project identifier (used as tmux session name).
+#           Must not contain dots or colons.
+#   dir   — Absolute path to the project directory. Tilde (~) is expanded.
+#
+# Optional fields:
+#   servers — List of background processes to run in popup windows.
+#     Each server entry has:
+#       name  — Display name shown in popup title (required)
+#       cmd   — Shell command to run (required)
+#       dir   — Working directory override (optional, defaults to project dir)
+
+projects:
+  - name: my-webapp
+    dir: ~/Projects/my-webapp
+    servers:
+      - name: dev-server
+        cmd: npm run dev
+      - name: db
+        cmd: docker compose up postgres
+
+  - name: api-service
+    dir: ~/Projects/api-service
+    servers:
+      - name: api
+        cmd: cargo run --release
+
+  - name: dotfiles
+    dir: ~/dotfiles
+    # No servers — just neovim + Claude Code

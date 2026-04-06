@@ -15,9 +15,9 @@
 
 **Purpose**: Create project directory structure and shared utilities
 
-- [ ] T001 Create directory structure: `bin/`, `lib/`, `tmux/`, `config/`
-- [ ] T002 [P] Create shared utilities (color output, error handling, path helpers) in `lib/utils.sh`
-- [ ] T003 [P] Create example configuration file in `config/projects.example.yml` with sample project entries per data-model.md schema
+- [x] T001 Create directory structure: `bin/`, `lib/`, `tmux/`, `config/`
+- [x] T002 [P] Create shared utilities (color output, error handling, path helpers) in `lib/utils.sh`
+- [x] T003 [P] Create example configuration file in `config/projects.example.yml` with sample project entries per data-model.md schema
 
 ---
 
@@ -27,9 +27,9 @@
 
 **CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T004 Implement YAML config parser using `yq` in `lib/config.sh` — functions: `config_load`, `config_get_project`, `config_list_projects`, `config_get_servers`
-- [ ] T005 Implement config validation in `lib/config.sh` — check required fields (name, dir), unique project names, print errors to stderr per CLI contract
-- [ ] T006 Create `bin/tms` entry point script — argument parsing for subcommands (`start`, `stop`, `list`), source all `lib/*.sh` files, validate config on startup
+- [x] T004 Implement YAML config parser using `yq` in `lib/config.sh` — functions: `config_load`, `config_get_project`, `config_list_projects`, `config_get_servers`
+- [x] T005 Implement config validation in `lib/config.sh` — check required fields (name, dir), unique project names, print errors to stderr per CLI contract
+- [x] T006 Create `bin/tms` entry point script — argument parsing for subcommands (`start`, `stop`, `list`), source all `lib/*.sh` files, validate config on startup
 
 **Checkpoint**: `tms list` can load and validate config (shows project names even if sessions aren't managed yet)
 
@@ -43,11 +43,11 @@
 
 ### Implementation for User Story 1
 
-- [ ] T007 [US1] Implement `session_create` in `lib/session.sh` — create named tmux session, set working directory, split into two panes (vertical, 60/40), launch neovim in left pane and Claude Code in right pane
-- [ ] T008 [US1] Implement `session_exists` in `lib/session.sh` — check if tmux session with given name already exists
-- [ ] T009 [US1] Implement `session_attach` in `lib/session.sh` — attach to existing session (use `switch-client` if already inside tmux, `attach-session` otherwise)
-- [ ] T010 [US1] Implement `tms start` subcommand in `bin/tms` — look up project in config, validate directory exists, call `session_exists` → `session_attach` or `session_create`
-- [ ] T011 [US1] Handle error cases in `tms start`: project not found (exit 1), directory missing (exit 1), per CLI contract error messages
+- [x] T007 [US1] Implement `session_create` in `lib/session.sh` — create named tmux session, set working directory, split into two panes (vertical, 60/40), launch neovim in left pane and Claude Code in right pane
+- [x] T008 [US1] Implement `session_exists` in `lib/session.sh` — check if tmux session with given name already exists
+- [x] T009 [US1] Implement `session_attach` in `lib/session.sh` — attach to existing session (use `switch-client` if already inside tmux, `attach-session` otherwise)
+- [x] T010 [US1] Implement `tms start` subcommand in `bin/tms` — look up project in config, validate directory exists, call `session_exists` → `session_attach` or `session_create`
+- [x] T011 [US1] Handle error cases in `tms start`: project not found (exit 1), directory missing (exit 1), per CLI contract error messages
 
 **Checkpoint**: `tms start <project>` creates a working two-pane session. `tms start` again reattaches. Neovim is suspendable with ctrl-z.
 
@@ -61,8 +61,8 @@
 
 ### Implementation for User Story 2
 
-- [ ] T012 [US2] Create tmux key bindings file `tmux/bindings.conf` with `prefix + P` bound to `choose-tree -s` (session chooser)
-- [ ] T013 [US2] Add installation instructions to `tmux/bindings.conf` as comments — how to source-file in user's tmux.conf
+- [x] T012 [US2] Create tmux key bindings file `tmux/bindings.conf` with `prefix + P` bound to `choose-tree -s` (session chooser)
+- [x] T013 [US2] Add installation instructions to `tmux/bindings.conf` as comments — how to source-file in user's tmux.conf
 
 **Checkpoint**: With `bindings.conf` sourced, `prefix + P` opens the session chooser showing all active project sessions.
 
@@ -76,11 +76,11 @@
 
 ### Implementation for User Story 3
 
-- [ ] T014 [US3] Implement `servers_start` in `lib/servers.sh` — for each server in project config, create a hidden window in the session and run the server command in a pane within it
-- [ ] T015 [US3] Implement `servers_popup_toggle` in `lib/servers.sh` — use `display-popup` to attach to the hidden server window/pane, showing server output; dismiss hides it
-- [ ] T016 [US3] Handle multiple servers in `lib/servers.sh` — each server gets its own pane in the hidden window, popup cycles through or shows a selection
-- [ ] T017 [US3] Integrate server startup into `session_create` in `lib/session.sh` — call `servers_start` after pane setup if project has servers configured
-- [ ] T018 [US3] Add `prefix + S` key binding in `tmux/bindings.conf` to call `servers_popup_toggle` for the current session
+- [x] T014 [US3] Implement `servers_start` in `lib/servers.sh` — for each server in project config, create a hidden window in the session and run the server command in a pane within it
+- [x] T015 [US3] Implement `servers_popup_toggle` in `lib/servers.sh` — use `display-popup` to attach to the hidden server window/pane, showing server output; dismiss hides it
+- [x] T016 [US3] Handle multiple servers in `lib/servers.sh` — each server gets its own pane in the hidden window, popup cycles through or shows a selection
+- [x] T017 [US3] Integrate server startup into `session_create` in `lib/session.sh` — call `servers_start` after pane setup if project has servers configured
+- [x] T018 [US3] Add `prefix + S` key binding in `tmux/bindings.conf` to call `servers_popup_toggle` for the current session
 
 **Checkpoint**: Servers run in the background, popup toggle shows/hides server output, main panes remain undisturbed.
 
@@ -94,8 +94,8 @@
 
 ### Implementation for User Story 4
 
-- [ ] T019 [US4] Add comprehensive comments and documentation to `config/projects.example.yml` — all fields, optional vs required, server examples
-- [ ] T020 [US4] Enhance config validation in `lib/config.sh` — check for empty name, empty dir, duplicate server names within a project, provide line-specific error context
+- [x] T019 [US4] Add comprehensive comments and documentation to `config/projects.example.yml` — all fields, optional vs required, server examples
+- [x] T020 [US4] Enhance config validation in `lib/config.sh` — check for empty name, empty dir, duplicate server names within a project, provide line-specific error context
 
 **Checkpoint**: Example config is self-documenting. Validation catches all malformed entries with actionable error messages.
 
@@ -109,9 +109,9 @@
 
 ### Implementation for User Story 5
 
-- [ ] T021 [US5] Implement `tms list` subcommand in `bin/tms` — iterate all projects from config, check session existence, format output with aligned columns
-- [ ] T022 [US5] Add color output to `tms list` — green/bold for running, dim for stopped (respecting terminal color support)
-- [ ] T023 [US5] Implement `tms stop` subcommand in `bin/tms` — kill tmux session by name, handle "not running" gracefully per CLI contract
+- [x] T021 [US5] Implement `tms list` subcommand in `bin/tms` — iterate all projects from config, check session existence, format output with aligned columns
+- [x] T022 [US5] Add color output to `tms list` — green/bold for running, dim for stopped (respecting terminal color support)
+- [x] T023 [US5] Implement `tms stop` subcommand in `bin/tms` — kill tmux session by name, handle "not running" gracefully per CLI contract
 
 **Checkpoint**: `tms list` shows a clean table of all projects with accurate status. `tms stop` cleanly kills sessions.
 
@@ -121,10 +121,10 @@
 
 **Purpose**: Final improvements across all stories
 
-- [ ] T024 [P] Add a README.md with installation, configuration, and usage instructions
-- [ ] T025 [P] Add `tms` help output (`tms --help`, `tms help`) showing all subcommands and usage
-- [ ] T026 Validate quickstart.md workflow end-to-end — follow all steps and verify they work
-- [ ] T027 [P] Add tmux version check to `bin/tms` — warn if tmux < 3.2 (popup support required)
+- [x] T024 [P] Add a README.md with installation, configuration, and usage instructions
+- [x] T025 [P] Add `tms` help output (`tms --help`, `tms help`) showing all subcommands and usage
+- [x] T026 Validate quickstart.md workflow end-to-end — follow all steps and verify they work
+- [x] T027 [P] Add tmux version check to `bin/tms` — warn if tmux < 3.2 (popup support required)
 
 ---
 
