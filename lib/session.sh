@@ -11,36 +11,50 @@ session_attach() {
     local session_name="$1"
     if [[ -n "${TMUX:-}" ]]; then
         # Already inside tmux — switch client
-        tmux switch-client -t "=$session_name"
+        tmux switch-client -t "$session_name"
     else
-        tmux attach-session -t "=$session_name"
+        tmux attach-session -t "$session_name"
     fi
 }
 
 # Create a new tmux session for a project
-# Layout: neovim (left, 60%) | Claude Code (right, 40%)
+# Window 0: _servers (if configured), Window 1: workspace (neovim + Claude Code)
 session_create() {
     local session_name="$1"
     local project_dir="$2"
 
-    # Create session in detached mode with the project directory
+    # Create session in detached mode — this becomes window 0
     tmux new-session -d -s "$session_name" -c "$project_dir"
 
-    # Split vertically: left pane gets 60%, right pane 40%
-    # The split creates a new pane on the right; -l sets the right pane size as percentage
-    tmux split-window -h -t "=$session_name" -c "$project_dir" -l 40%
+    # Tag session as tms-managed and load key bindings
+    tmux set-option -t "$session_name" @tms 1
+    tmux set-option -g @tms_dir "$TMS_DIR"
+    tmux source-file "$TMS_DIR/tmux/bindings.conf"
 
-    # Left pane (pane 0): launch neovim
-    tmux send-keys -t "=$session_name:.0" 'nvim .' Enter
+    # Enable visual bell so Claude Code notifications highlight the pane
+    tmux set-option -t "$session_name" visual-bell on
+    tmux set-option -t "$session_name" monitor-bell on
 
-    # Right pane (pane 1): launch Claude Code
-    tmux send-keys -t "=$session_name:.1" 'claude' Enter
-
-    # Start servers if configured
+    # Start servers in window 0 (if configured), then create workspace in window 1
     servers_start "$session_name"
 
+    # Create workspace window (window 1 if servers exist, window 0 if not)
+    tmux new-window -t "$session_name" -n "workspace" -c "$project_dir"
+
+    # Split vertically: left pane gets 60%, right pane 40%
+    tmux split-window -h -t "${session_name}:workspace" -c "$project_dir" -l 40%
+
+    # Left pane (pane 0): launch neovim
+    tmux send-keys -t "${session_name}:workspace.0" 'nvim .' Enter
+
+    # Right pane (pane 1): launch Claude Code
+    tmux send-keys -t "${session_name}:workspace.1" 'claude --continue' Enter
+
     # Select the left (editor) pane as active
-    tmux select-pane -t "=$session_name:.0"
+    tmux select-pane -t "${session_name}:workspace.0"
+
+    # Focus the workspace window
+    tmux select-window -t "${session_name}:workspace"
 }
 
 # cmd_start — main entry point for "tms start <project>"

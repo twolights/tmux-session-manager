@@ -14,8 +14,8 @@ servers_start() {
         return 0
     fi
 
-    # Create a hidden window named "_servers" for server processes
-    tmux new-window -d -t "=$session_name" -n "_servers"
+    # Rename the initial window (window 0) to "_servers"
+    tmux rename-window -t "${session_name}:0" "_servers"
 
     local i server_name server_cmd server_dir
     for ((i = 0; i < server_count; i++)); do
@@ -25,19 +25,16 @@ servers_start() {
 
         if [[ "$i" -eq 0 ]]; then
             # Use the first pane of the _servers window
-            tmux send-keys -t "=$session_name:_servers.0" "cd '$server_dir' && echo '=== $server_name ===' && $server_cmd" Enter
+            tmux send-keys -t "${session_name}:_servers.0" "cd '$server_dir' && echo '=== $server_name ===' && $server_cmd" Enter
         else
             # Split for additional servers
-            tmux split-window -v -t "=$session_name:_servers" -c "$server_dir"
-            tmux send-keys -t "=$session_name:_servers.$i" "echo '=== $server_name ===' && $server_cmd" Enter
+            tmux split-window -v -t "${session_name}:_servers" -c "$server_dir"
+            tmux send-keys -t "${session_name}:_servers.$i" "echo '=== $server_name ===' && $server_cmd" Enter
         fi
     done
 
     # Even out the pane layout if multiple servers
     if [[ "$server_count" -gt 1 ]]; then
-        tmux select-layout -t "=$session_name:_servers" even-vertical
+        tmux select-layout -t "${session_name}:_servers" even-vertical
     fi
-
-    # Switch back to the first window (the workspace)
-    tmux select-window -t "=$session_name:0"
 }
