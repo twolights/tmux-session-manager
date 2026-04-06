@@ -14,6 +14,7 @@ source "$TMS_DIR/lib/servers.sh"
 # Check dependencies
 require_cmd tmux
 require_cmd yq
+require_cmd fzf
 
 # Check tmux version (3.2+ required for display-popup)
 _check_tmux_version() {

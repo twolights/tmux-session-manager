@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# tms-switch — fzf picker for tms-managed tmux sessions
+# Called from tmux key binding via display-popup
+
+sessions=$(tmux list-sessions -F '#S' -f '#{@tms}')
+
+if [ -z "$sessions" ]; then
+    echo "No tms sessions found."
+    sleep 1
+    exit 0
+fi
+
+selected=$(echo "$sessions" | fzf --reverse)
+
+if [ -n "$selected" ]; then
+    tmux switch-client -t "$selected"
+fi
