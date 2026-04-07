@@ -48,11 +48,13 @@ _config_validate() {
         fi
 
         # Check for duplicate names
-        for seen in "${seen_names[@]}"; do
-            if [[ "$seen" == "$name" ]]; then
-                die "duplicate project name '$name'"
-            fi
-        done
+        if [[ ${#seen_names[@]} -gt 0 ]]; then
+            for seen in "${seen_names[@]}"; do
+                if [[ "$seen" == "$name" ]]; then
+                    die "duplicate project name '$name'"
+                fi
+            done
+        fi
         seen_names+=("$name")
 
         # Validate servers if present
@@ -72,11 +74,13 @@ _config_validate() {
                     die "project '$name' server '$sname' missing required field 'cmd'"
                 fi
 
-                for ss in "${seen_server_names[@]}"; do
-                    if [[ "$ss" == "$sname" ]]; then
-                        die "project '$name' has duplicate server name '$sname'"
-                    fi
-                done
+                if [[ ${#seen_server_names[@]} -gt 0 ]]; then
+                    for ss in "${seen_server_names[@]}"; do
+                        if [[ "$ss" == "$sname" ]]; then
+                            die "project '$name' has duplicate server name '$sname'"
+                        fi
+                    done
+                fi
                 seen_server_names+=("$sname")
             done
         fi
