@@ -1,8 +1,9 @@
 # claude-code-tmux-manager Development Guidelines
 
-Auto-generated from all feature plans. Last updated: 2026-04-06
+Auto-generated from all feature plans. Last updated: 2026-04-21
 
 ## Active Technologies
+- Bash 4+ (POSIX-compatible where feasible), consistent with existing `lib/*.sh` modules + tmux 3.2+, yq (Python-based), fzf, Claude Code CLI, macOS system frameworks; new dependency `terminal-notifier` (selected in Phase 0 research for clickable banner support with `-execute` callback) (002-claude-notification-hook)
 
 - Bash (POSIX-compatible where possible, bash 4+ for associative arrays) + tmux 3.2+, neovim, Claude Code CLI, yq (Python-based), fzf (001-tmux-session-manager)
 
@@ -36,11 +37,10 @@ Bash (POSIX-compatible where possible, bash 4+ for associative arrays): Follow s
 - Keybindings are auto-loaded by `tms start` and guarded with `@tms` session option.
 
 ## Recent Changes
+- 002-claude-notification-hook: Added Bash 4+ (POSIX-compatible where feasible), consistent with existing `lib/*.sh` modules + tmux 3.2+, yq (Python-based), fzf, Claude Code CLI, macOS system frameworks; new dependency `terminal-notifier` (selected in Phase 0 research for clickable banner support with `-execute` callback)
 
 - Auto-loaded keybindings with fzf session switcher (no .tmux.conf needed)
 - Window layout: servers at window 0, workspace at window 1
-- Claude Code launches with --continue to resume last session
-- Visual bell notifications when Claude Code needs attention
 
 <!-- MANUAL ADDITIONS START -->
 <!-- MANUAL ADDITIONS END -->
