@@ -10,6 +10,7 @@ source "$TMS_DIR/lib/utils.sh"
 source "$TMS_DIR/lib/config.sh"
 source "$TMS_DIR/lib/session.sh"
 source "$TMS_DIR/lib/servers.sh"
+source "$TMS_DIR/lib/notify.sh"
 
 # Check dependencies
 require_cmd tmux
@@ -38,6 +39,10 @@ Usage:
   tms start <project>    Launch or attach to a project workspace
   tms stop <project>     Stop a project session
   tms list               List all projects and their status
+  tms switch <project>   Switch the active tmux session to the project (non-interactive)
+  tms install-hooks      Install or remove the Claude Code Notification hook
+                           [--uninstall]  Remove the hook
+                           [--dry-run]    Preview changes without writing
   tms help               Show this help message
 
 Options:
@@ -63,6 +68,14 @@ case "$cmd" in
     list)
         config_load
         cmd_list
+        ;;
+    switch)
+        [[ -z "${1:-}" ]] && die "usage: tms switch <project-name>"
+        config_load
+        cmd_switch "$1"
+        ;;
+    install-hooks)
+        cmd_install_hooks "$@"
         ;;
     help|-h|--help)
         usage

@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+# tms-notify-hook — entry point for Claude Code's Notification hook
+set -euo pipefail
+
+TMS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+source "$TMS_DIR/lib/utils.sh"
+source "$TMS_DIR/lib/config.sh"
+source "$TMS_DIR/lib/session.sh"
+source "$TMS_DIR/lib/servers.sh"
+source "$TMS_DIR/lib/notify.sh"
+
+# Trap: convert any unexpected error into a log entry; never block Claude Code.
+_hook_error_handler() {
+    local exit_code="$?"
+    notify_log_failure "hook-error" "-" "-" "-" "unexpected error at line $BASH_LINENO (exit $exit_code)" 2>/dev/null || true
+    exit 0
+}
+trap '_hook_error_handler' ERR
+
+# --- read stdin ---
+# read returns 1 on EOF-without-newline but still fills the variable — don't clear it.
+payload=""
+IFS= read -r -t 5 payload 2>/dev/null || true
+
+# Collect any remaining lines (multi-line payloads)
+while IFS= read -r -t 0.1 _line 2>/dev/null; do
+    payload="${payload}${_line}"
+done || true
+
+# --- parse-error branch (T019) ---
+# Must be first check after stdin read.
+if [[ -z "$payload" ]]; then
+    notify_log_failure "parse-error" "-" "-" "-" "empty stdin"
+    exit 0
+fi
+
+hook_event_name=$(notify_parse_json_field "hook_event_name" "$payload")
+if [[ -z "$hook_event_name" ]] || [[ "$hook_event_name" != "Notification" ]]; then
+    notify_log_failure "parse-error" "-" "-" "-" "$(printf '%.512s' "$payload")"
+    exit 0
+fi
+
+# --- extract fields ---
+cwd=$(notify_parse_json_field "cwd" "$payload")
+message=$(notify_parse_json_field "message" "$payload")
+notification_type=$(notify_parse_json_field "notification_type" "$payload")
+session_id=$(notify_parse_json_field "session_id" "$payload")
+
+# Replace embedded newlines in message with spaces (FR-003)
+message="${message//$'\n'/ }"
+
+# Resolve terminal bundles early — needed for -sender on every terminal-notifier
+# call. macOS 26+ silently drops terminal-notifier banners without -sender, and
+# hangs indefinitely when -sender points at a third-party terminal whose
+# Info.plist doesn't advertise the expected notification capability (iTerm2).
+# sender_bundle is a safe, system-registered bundle; term_bundle_id is the real
+# terminal, used as the `open -b` target in the click callback.
+term_bundle_id=$(notify_resolve_term_bundle)
+sender_bundle=$(notify_resolve_sender_bundle)
+
+# --- no-cwd branch (T017) ---
+if [[ -z "$cwd" ]]; then
+    if command -v terminal-notifier >/dev/null 2>&1; then
+        ( terminal-notifier -title "Claude Code" -message "${message:-Claude Code needs attention.}" -sender "$sender_bundle" >/dev/null 2>&1 ) &
+        disown 2>/dev/null || true
+    fi
+    notify_log_failure "no-cwd" "-" "$notification_type" "$session_id" "$message"
+    exit 0
+fi
+
+# --- config load (needed for project resolution and opt-out check) ---
+# Suppress die() from config_load if config is missing — log and exit 0 instead.
+if ! config_load 2>/dev/null; then
+    notify_log_failure "no-project-match" "-" "$notification_type" "$session_id" "config load failed; cwd=$cwd"
+    exit 0
+fi
+
+# --- no-project-match branch (T018) ---
+project_name=""
+if ! project_name=$(notify_resolve_project_from_cwd "$cwd"); then
+    if command -v terminal-notifier >/dev/null 2>&1; then
+        ( terminal-notifier -title "Claude Code" -message "${message:-Claude Code needs attention.}" -sender "$sender_bundle" >/dev/null 2>&1 ) &
+        disown 2>/dev/null || true
+    fi
+    notify_log_failure "no-project-match" "-" "$notification_type" "$session_id" "cwd=$cwd"
+    exit 0
+fi
+
+# --- per-project opt-out check ---
+enabled=$(config_get_notifications_enabled "$project_name" 2>/dev/null || echo "true")
+if [[ "$enabled" == "false" ]]; then
+    # Silent exit — no notification, no log (per data-model.md §Per-Project Notification Setting)
+    exit 0
+fi
+
+# --- empty-message guard (T020) ---
+if [[ -z "$message" ]]; then
+    message="Claude Code needs attention."
+    notify_log_failure "empty-message" "$project_name" "$notification_type" "$session_id" "-"
+fi
+
+# --- notifier-missing check ---
+if ! command -v terminal-notifier >/dev/null 2>&1; then
+    notify_log_failure "notifier-missing" "$project_name" "$notification_type" "$session_id" "$message"
+    exit 0
+fi
+
+# --- build click callback (T016) ---
+tms_abs_path="$TMS_DIR/bin/tms"
+log_path=$(notify_log_path)
+
+# Single-quote each substituted value; escape embedded ' as '\''
+_sq() { printf "%s" "$1" | sed "s/'/'\\\\''/g"; }
+
+click_cmd="open -b '$(_sq "$term_bundle_id")' ; '$(_sq "$tms_abs_path")' switch '$(_sq "$project_name")' 2>&1 | tee -a '$(_sq "$log_path")' ; [ \"\${PIPESTATUS[0]:-0}\" -ne 0 ] && terminal-notifier -sender '$(_sq "$sender_bundle")' -title 'Claude Code — $(_sq "$project_name")' -message \"Session not running. Run 'tms start $(_sq "$project_name")' to restart it.\""
+
+# --- emit notification in detached background subshell ---
+(
+    terminal-notifier \
+        -title "$project_name" \
+        -message "$message" \
+        -sender "$sender_bundle" \
+        -execute "$click_cmd" \
+        >/dev/null 2>&1 \
+    || notify_log_failure "notifier-failed" "$project_name" "$notification_type" "$session_id" "$message"
+) &
+disown 2>/dev/null || true
+
+exit 0

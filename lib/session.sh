@@ -93,6 +93,36 @@ cmd_stop() {
     fi
 }
 
+# cmd_switch — switch to a project's tmux session and land on the workspace window
+cmd_switch() {
+    local project="$1"
+
+    config_get_project_dir "$project" >/dev/null || die "project '$project' not found in configuration"
+
+    if ! session_exists "$project"; then
+        die "session '$project' is not running. Run 'tms start $project' to restart it."
+    fi
+
+    # Retarget or attach the tmux client
+    if tmux list-clients -t "$project" 2>/dev/null | grep -q .; then
+        tmux switch-client -t "$project"
+    elif [[ -t 0 ]]; then
+        tmux attach-session -t "$project"
+    else
+        # Non-TTY (notification click context): try switch-client on any available client
+        local any_client
+        any_client=$(tmux list-clients -F '#{client_name}' 2>/dev/null | head -1)
+        if [[ -n "$any_client" ]]; then
+            tmux switch-client -c "$any_client" -t "$project"
+        else
+            die "no tmux client to retarget; cannot switch from this context."
+        fi
+    fi
+
+    # Always land on workspace window (FR-004)
+    tmux select-window -t "${project}:workspace"
+}
+
 # cmd_list — show all configured projects with running status
 cmd_list() {
     local projects

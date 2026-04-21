@@ -13,6 +13,11 @@
 #       name  — Display name shown in popup title (required)
 #       cmd   — Shell command to run (required)
 #       dir   — Working directory override (optional, defaults to project dir)
+#
+#   notifications — Controls macOS notification banners via tms install-hooks.
+#     notifications.enabled  — bool, default true. Set to false to suppress
+#                              macOS banners for this project (opt-out). The
+#                              tmux visual bell is unaffected by this flag.
 
 projects:
   - name: my-webapp
@@ -32,3 +37,8 @@ projects:
   - name: dotfiles
     dir: ~/dotfiles
     # No servers — just neovim + Claude Code
+
+  - name: quiet-project
+    dir: ~/Projects/quiet-project
+    notifications:
+      enabled: false   # suppress macOS banners for this project; tmux visual bell still fires
