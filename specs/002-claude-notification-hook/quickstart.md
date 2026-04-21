@@ -5,6 +5,9 @@
 
 This document is both the user-facing install guide and the manual verification recipe. Because the repo has no automated test harness, each numbered scenario below maps to an acceptance criterion in `spec.md` and each branch of the contracts in `contracts/`.
 
+> **⚠️ macOS 26+ (Tahoe) — click-to-switch currently blocked**  
+> Banner *delivery* works end-to-end (QS-2, QS-5, QS-6, QS-7 pass). Banner *click callbacks* (`-execute`, `-activate`) do not dispatch on macOS 26 — a macOS-side restriction on unsigned notification handlers, not a bug in tms. QS-3 and QS-4 are therefore currently failing on macOS 26 pending a remediation decision (see [research.md §7](research.md) for the three options under review). On pre-macOS-26, all scenarios pass.
+
 ---
 
 ## Prerequisites (one-time per machine)

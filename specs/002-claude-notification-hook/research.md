@@ -125,6 +125,52 @@ Fallback order for resolving `$TERM_BUNDLE_ID`: `$__CFBundleIdentifier` → `$TE
 
 ---
 
+## 6. macOS 26+ compatibility: `-sender` bundle override
+
+**Decision**: All `terminal-notifier` invocations MUST pass `-sender com.apple.Terminal` as a hardcoded safe sender, regardless of which terminal emulator is actually hosting Claude Code. The real terminal bundle (resolved per §5b) is still used for the click callback's `open -b <bundle>` target, but it is NOT used as `-sender`. This is implemented in `lib/notify.sh` as `notify_resolve_sender_bundle()` (returns `com.apple.Terminal`), kept distinct from `notify_resolve_term_bundle()` (returns the real terminal for click activation).
+
+**Rationale**: Discovered during bring-up on macOS 26.4 (Tahoe). Two independent failure modes:
+
+1. Without `-sender` at all, `terminal-notifier` 2.0.0 (2018) returns exit 0 but Notification Center silently drops the banner. Apple has tightened delivery requirements for unsigned/unnotarized tools, so the default sender (terminal-notifier's own bundle `fr.julienxx.oss.terminal-notifier`) is no longer reliably delivered. Verified empirically: identical invocations with and without `-sender` produce exit 0 both times, but only the `-sender` variant actually shows a banner.
+2. With `-sender com.googlecode.iterm2` (iTerm2 is the actual host terminal on the bring-up machine), `terminal-notifier` **hangs indefinitely** — the subprocess never returns. Apparently iTerm2's bundle doesn't advertise the notification capability in its Info.plist in whatever form terminal-notifier expects, and the call blocks waiting for a response. Verified empirically: `timeout 10 terminal-notifier -sender com.googlecode.iterm2 ...` exits 124; same invocation with `-sender com.apple.Terminal` exits 0 and delivers the banner. This likely affects other third-party terminal bundles (Ghostty, Alacritty, kitty, WezTerm) to varying degrees — they were not tested but are assumed broken-by-default.
+
+`com.apple.Terminal` is the universally safe sender because it is a system-shipped app with guaranteed notification registration in its Info.plist. The cost is cosmetic: the banner icon shows Terminal.app rather than the user's actual terminal. The click callback still foregrounds the correct terminal via `open -b <real-bundle>`, so functional correctness is preserved.
+
+**Alternatives considered**:
+
+- Per-terminal allow/deny lists — tried conceptually; rejected because we cannot statically know which terminals advertise notification capability on which macOS versions, so this would require a probe step at install time that is fragile and adds complexity.
+- Swap to `alerter` — still rejected for the same reason as §1 (wrong shape for fire-and-forget hooks); and the sender-bundle issue likely affects alerter too since it uses the same underlying macOS notification APIs.
+- Custom Swift binary — now slightly more attractive as a fallback if `terminal-notifier` ever fully breaks on a future macOS, but still rejected today on simplicity grounds.
+
+**Scope note**: This workaround is invisible to the user except that the banner shows Terminal.app's icon instead of iTerm2's / Ghostty's / etc. If a future terminal-notifier release (or an official alternative) restores proper sender-bundle handling, `notify_resolve_sender_bundle` can be removed and `notify_resolve_term_bundle` used directly for both roles.
+
+## 7. macOS 26+ click callbacks broken (OPEN — blocks FR-004/FR-005)
+
+**Observation**: On macOS 26.4 (Tahoe), `terminal-notifier` 2.0.0 click callbacks do not dispatch, regardless of flag used. Both `-execute '<shell-cmd>'` (our primary mechanism for FR-004 click-to-switch) and `-activate '<bundle-id>'` (foreground-only fallback) silently do nothing when the user clicks the banner body. Verified empirically with two canary banners:
+
+| Canary | Flag | Expected | Observed |
+|--------|------|----------|----------|
+| A | `-execute 'touch /tmp/tms-click-canary'` | file created on click | file never created |
+| B | `-activate com.googlecode.iterm2` | iTerm2 foregrounds on click | iTerm2 stays in background |
+
+This is separate from the delivery issue documented in §6. Banners *deliver* correctly with the `-sender com.apple.Terminal` workaround, but the click-dispatch mechanism on the back end is also broken. The most likely cause is Apple's tightening of notification-callback entitlements in recent macOS: `terminal-notifier` is not codesigned/notarized in a way that lets macOS route banner-click events back to it, so the stored callback is dropped.
+
+**Status**: OPEN. The macOS 26 `-sender` delivery fix (§6) was necessary but not sufficient for the full feature. User Story 1 (banner fires with project name) works end-to-end. User Story 2 (click-to-switch) is blocked until we choose a remediation.
+
+**Remediation options** (none chosen yet; left to Phase 2 decision):
+
+1. **Accept the limitation on macOS 26** — banner still identifies the project, but strip `-execute` from the hook and document that users must manually switch via `prefix+P` (existing fzf picker) or `tms switch <name>`. Delivers ~70% of the feature value with zero additional dependencies. Lowest effort (~5 min to implement the macOS-version guard).
+
+2. **Swap to `alerter`** (<https://github.com/vjeantet/alerter>) — uses a different click mechanism (blocks the process until the user interacts, then prints the click result to stdout; no reliance on macOS's notification-callback delivery path). Previously rejected in §1 as "wrong shape for a fire-and-forget hook," but the shape can be accommodated: run `alerter` inside the existing detached subshell and dispatch the switch from there. Risk: `alerter`'s last release is 2015, so it may have its own macOS 26 issues we haven't found yet. Moderate effort (~15-20 min implementation + test cycle).
+
+3. **Minimal Swift notification helper** — ship a tiny Swift binary (~100 lines) using `UNUserNotificationCenter` with an explicit click handler, ad-hoc signed for personal use. Correct long-term fix; adds a compiled binary and a build step to the repo. Moderate-to-large effort (~1-2 hours + test cycle).
+
+4. **URL scheme handler** — register a custom `tms://` URL scheme via a small LSHandler app; put the URL in the banner body so clicks activate the handler. Same codesigning requirements as Option 3. Rejected as more complex without being more correct.
+
+**Pending decision**: Document-only update 2026-04-21; implementation remediation deferred pending user decision between Options 1–3.
+
+---
+
 ## Summary of decisions feeding Phase 1
 
 - **New runtime dependencies**: `terminal-notifier` (required for emission), `jq` (required for `tms install-hooks` only; optional for the hook if a jq-free fallback JSON extractor is provided).

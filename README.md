@@ -180,9 +180,15 @@ Failed notifications are logged to:
 
 Override the directory with `TMS_STATE_DIR` or `XDG_STATE_HOME`.
 
-### Known limitation — multiple terminal windows
+### Known limitation — click-to-switch on macOS 26 (Tahoe)
 
-If you have two or more windows of the same terminal emulator open, clicking the banner foregrounds the application but macOS chooses whichever window was most recently active as the frontmost OS window. The tmux client in any other window *does* get retargeted to the correct project, but it may be hidden behind the frontmost window — cycle windows (⌘\` on macOS) to find it. Single-window users are unaffected.
+On macOS 26+, `terminal-notifier`'s click callbacks (`-execute`, `-activate`) do not dispatch — clicking the banner does nothing. Banner *delivery* works (the project-name banner still fires reliably), but clicking it is a no-op. This is a macOS-side restriction on unsigned notification handlers, not a bug in tms. Remediation is tracked in [`specs/002-claude-notification-hook/research.md` §7](specs/002-claude-notification-hook/research.md).
+
+Workaround: use `prefix + P` (fzf session picker) or `tms switch <project>` to switch manually. The banner still tells you which project needs attention.
+
+### Known limitation — multiple terminal windows (pre-macOS-26 only)
+
+*This section only applies when click-to-switch is functional — see above.* If you have two or more windows of the same terminal emulator open, clicking the banner foregrounds the application but macOS chooses whichever window was most recently active as the frontmost OS window. The tmux client in any other window *does* get retargeted to the correct project, but it may be hidden behind the frontmost window — cycle windows (⌘\` on macOS) to find it. Single-window users are unaffected.
 
 For the full verification recipe, see [`specs/002-claude-notification-hook/quickstart.md`](specs/002-claude-notification-hook/quickstart.md).
 
