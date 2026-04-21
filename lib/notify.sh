@@ -128,7 +128,7 @@ notify_resolve_project_from_cwd() {
 # notify_resolve_term_bundle
 #
 # Print the macOS bundle id of the terminal emulator hosting Claude Code.
-# Used as the target for `open -b` in the click callback — must be the REAL
+# Used as the target for `open -b` in the click handler — must be the REAL
 # terminal so the right window foregrounds when the user clicks the banner.
 # Prefers $__CFBundleIdentifier (set by macOS for GUI-launched apps); falls
 # back to a $TERM_PROGRAM lookup; ultimate fallback is Terminal.app.
@@ -148,19 +148,6 @@ notify_resolve_term_bundle() {
     esac
 }
 
-# notify_resolve_sender_bundle
-#
-# Print the bundle id to pass to `terminal-notifier -sender`. macOS 26
-# silently drops banners when -sender is absent, and hangs indefinitely
-# when -sender points at a third-party terminal (e.g. iTerm2) whose
-# Info.plist doesn't advertise the expected notification capability.
-# com.apple.Terminal is a system app with guaranteed notification
-# registration, so we use it as a universal safe sender. The banner icon
-# will show Terminal.app, but the banner will actually deliver.
-notify_resolve_sender_bundle() {
-    printf '%s\n' "com.apple.Terminal"
-}
-
 # --- install / uninstall hooks -------------------------------------------
 
 # cmd_install_hooks [--uninstall] [--dry-run]
@@ -177,9 +164,9 @@ cmd_install_hooks() {
         shift
     done
 
-    # Preconditions (skip for uninstall — don't require terminal-notifier to uninstall)
+    # Preconditions (skip for uninstall — don't require alerter to uninstall)
     if [[ "$do_uninstall" == "false" ]]; then
-        require_cmd terminal-notifier "brew install terminal-notifier"
+        require_cmd alerter "brew install alerter"
         require_cmd jq "brew install jq"
     else
         require_cmd jq "brew install jq"
@@ -318,25 +305,26 @@ _install_hooks_uninstall() {
 
 _install_hooks_probe() {
     local tms_hook_path="$1"
-    local log_path sender_bundle
+    local log_path
     log_path=$(notify_log_path)
-    sender_bundle=$(notify_resolve_sender_bundle)
 
-    # -sender is required on macOS 26+: without it, terminal-notifier banners
-    # are silently suppressed by Notification Center.
-    terminal-notifier \
-        -title 'tms' \
-        -message 'Notification hook installed. You should see this banner.' \
-        -sender "$sender_bundle" \
-        >/dev/null 2>&1 || true
+    # alerter defaults --sender to com.apple.Terminal (the only universally
+    # working sender on macOS 26+), so we don't pass --sender ourselves.
+    alerter \
+        --title 'tms' \
+        --message 'Notification hook installed. You should see this banner.' \
+        --timeout 10 \
+        >/dev/null 2>&1 &
+    disown 2>/dev/null || true
 
     cat <<PROBE
 
 If you saw a macOS banner titled 'tms' just now, notifications are working.
-If macOS asked you to allow notifications for 'terminal-notifier', click
-Allow — you're done. If nothing appeared, open:
+If macOS asked you to allow notifications for 'Terminal' (alerter delivers
+under Terminal's bundle for compatibility), click Allow — you're done.
+If nothing appeared, open:
 
-    System Settings → Notifications → terminal-notifier
+    System Settings → Notifications → Terminal
 
 and turn notifications on for that entry. Claude Code's Notification hook
 will fire banners through the same permission, so this is a one-time setup.
