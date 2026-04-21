@@ -71,7 +71,11 @@ case "$cmd" in
         ;;
     switch)
         [[ -z "${1:-}" ]] && die "usage: tms switch <project-name>"
-        config_load
+        # Use the lite loader: switch is a hot path (notification click
+        # callback) and full per-project validation is unnecessary here.
+        # cmd_switch falls back to _config_validate on lookup miss, so a
+        # malformed config still surfaces the precise structural error.
+        config_load_lite
         cmd_switch "$1"
         ;;
     install-hooks)

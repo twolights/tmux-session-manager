@@ -97,7 +97,11 @@ cmd_stop() {
 cmd_switch() {
     local project="$1"
 
-    config_get_project_dir "$project" >/dev/null || die "project '$project' not found in configuration"
+    # Fast path: single-yq existence check; falls back to full _config_validate
+    # only if the lookup misses (so a malformed config still produces the
+    # precise structural error before we report "not found").
+    config_project_exists_or_validate "$project" \
+        || die "project '$project' not found in configuration"
 
     if ! session_exists "$project"; then
         die "session '$project' is not running. Run 'tms start $project' to restart it."
