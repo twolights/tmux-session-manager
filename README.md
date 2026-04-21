@@ -19,7 +19,7 @@ Each project gets a tmux session with:
 - [fzf](https://github.com/junegunn/fzf) (fuzzy finder for session switching)
 
 **For Claude Code notification banners** (optional — see [Enabling Claude Code notifications](#enabling-claude-code-notifications)):
-- [terminal-notifier](https://github.com/julienXX/terminal-notifier): `brew install terminal-notifier`
+- [alerter](https://github.com/vjeantet/alerter): `brew install alerter`
 - [jq](https://jqlang.github.io/jq/): `brew install jq`
 
 ## Installation
@@ -147,13 +147,13 @@ tms can show clickable macOS notification banners when Claude Code needs your at
 
 ```bash
 # Install dependencies (one-time)
-brew install terminal-notifier jq
+brew install alerter jq
 
 # Register the hook with Claude Code
 tms install-hooks
 ```
 
-`tms install-hooks` writes the hook entry to `~/.claude/settings.json` and fires a test banner to confirm macOS notification permissions are granted. If macOS prompts you to allow notifications for `terminal-notifier`, click **Allow**. If you miss the prompt or the banner doesn't appear, open **System Settings → Notifications → terminal-notifier** and enable notifications there.
+`tms install-hooks` writes the hook entry to `~/.claude/settings.json` and fires a test banner to confirm macOS notification permissions are granted. If macOS prompts you to allow notifications for **Terminal**, click **Allow** (alerter delivers under Terminal's bundle for macOS 26+ compatibility — see [research notes](specs/002-claude-notification-hook/research.md#6-macos-26-compatibility-sender-bundle-override)). If you miss the prompt or the banner doesn't appear, open **System Settings → Notifications → Terminal** and enable notifications there.
 
 Re-running `tms install-hooks` is idempotent. To remove the hook: `tms install-hooks --uninstall`.
 
@@ -180,15 +180,9 @@ Failed notifications are logged to:
 
 Override the directory with `TMS_STATE_DIR` or `XDG_STATE_HOME`.
 
-### Known limitation — click-to-switch on macOS 26 (Tahoe)
+### Known limitation — multiple terminal windows
 
-On macOS 26+, `terminal-notifier`'s click callbacks (`-execute`, `-activate`) do not dispatch — clicking the banner does nothing. Banner *delivery* works (the project-name banner still fires reliably), but clicking it is a no-op. This is a macOS-side restriction on unsigned notification handlers, not a bug in tms. Remediation is tracked in [`specs/002-claude-notification-hook/research.md` §7](specs/002-claude-notification-hook/research.md).
-
-Workaround: use `prefix + P` (fzf session picker) or `tms switch <project>` to switch manually. The banner still tells you which project needs attention.
-
-### Known limitation — multiple terminal windows (pre-macOS-26 only)
-
-*This section only applies when click-to-switch is functional — see above.* If you have two or more windows of the same terminal emulator open, clicking the banner foregrounds the application but macOS chooses whichever window was most recently active as the frontmost OS window. The tmux client in any other window *does* get retargeted to the correct project, but it may be hidden behind the frontmost window — cycle windows (⌘\` on macOS) to find it. Single-window users are unaffected.
+If you have two or more windows of the same terminal emulator open, clicking the banner foregrounds the application but macOS chooses whichever window was most recently active as the frontmost OS window. The tmux client in any other window *does* get retargeted to the correct project, but it may be hidden behind the frontmost window — cycle windows (⌘\` on macOS) to find it. Single-window users are unaffected.
 
 For the full verification recipe, see [`specs/002-claude-notification-hook/quickstart.md`](specs/002-claude-notification-hook/quickstart.md).
 

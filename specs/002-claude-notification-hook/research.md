@@ -9,15 +9,23 @@ This document resolves the remaining technical unknowns surfaced by the Technica
 
 ## 1. macOS notifier tool
 
-**Decision**: Use `terminal-notifier` (Homebrew) invoked with the `-execute <shell-command>` flag to make the banner clickable and run a callback.
+**Decision (revised 2026-04-21 during bring-up)**: Use [`alerter`](https://github.com/vjeantet/alerter) (Homebrew) as the sole notifier. Banner is fired in a detached subshell; alerter blocks until the user clicks or the `--timeout` expires, then prints `@CONTENTCLICKED` / `@TIMEOUT` / `@CLOSED` to stdout. The subshell parses the result and dispatches the click action (`open -b <bundle>` + `tms switch <project>`) directly. The hook itself returns immediately (FR-007 / SC-005 preserved by the detached subshell pattern).
 
-**Rationale**: `terminal-notifier` 2.0.0 is in Homebrew with current bottles for Sonoma, Sequoia, and Tahoe (<https://formulae.brew.sh/formula/terminal-notifier>). Its `-execute COMMAND` flag is documented to "run the shell command COMMAND when the user clicks the notification" — this is banner-click, which is exactly the FR-004 behavior, not an action-button press. `osascript -e 'display notification ...'` has no click action at all (clicks only open Script Editor), so it is a hard block. `alerter` exists and is more recently maintained, but it emits click results to stdout for the caller to dispatch, which is the wrong shape for a fire-and-forget Claude Code hook that must return immediately (FR-007). First run will trigger macOS Notification Center permission prompting under the `fr.julienxx.oss.terminal-notifier` bundle; we document this in the `tms install-hooks` output (quickstart.md will cover the user-visible steps). Sources: <https://github.com/julienXX/terminal-notifier>, <https://formulae.brew.sh/formula/terminal-notifier>.
+**Rationale**: This decision was originally `terminal-notifier` (see "Original decision (superseded)" below) but was reversed during bring-up testing on macOS 26.4 (Tahoe) when two independent failure modes emerged — see §6 (banner-delivery `-sender` requirement) and §7 (click-callback dispatch broken on macOS 26). `terminal-notifier` 2.0.0 banners can be made to deliver with a workaround, but its `-execute` and `-activate` click callbacks do not dispatch on macOS 26 at all (verified empirically with two canary banners). `alerter` uses a fundamentally different click mechanism — it stays alive blocking on the click event and prints the result to stdout, sidestepping the macOS notification-callback dispatch path entirely. The fire-and-forget shape we previously thought incompatible with `alerter` is recovered by running it inside the existing detached subshell: the parent hook still returns immediately while the subshell waits for the click.
 
-**Alternatives considered**:
+`alerter` defaults `--sender` to `com.apple.Terminal`, which happens to be the only universally-working sender on macOS 26+ (see §6 for why), so we don't need to pass `--sender` ourselves — the workaround is built in.
 
+**Alternatives considered (revised)**:
+
+- `terminal-notifier` (the original choice) — banner delivery requires `-sender com.apple.Terminal` workaround on macOS 26 (§6); click callbacks are non-functional on macOS 26 (§7). Two open issues outweigh the slight UX edge it had pre-26.
 - `osascript 'display notification ...'` — built-in, zero install, but no click-action support. Rejected.
-- `alerter` (<https://github.com/vjeantet/alerter>) — more active fork, but requires a parent process to wait on stdout and dispatch clicks; fundamentally incompatible with the fire-and-forget hook shape we need. Held as a future fallback only if terminal-notifier breaks on a future macOS.
-- Custom Swift binary using `UNUserNotificationCenter` — the principled modern path, but adds a build toolchain dependency and maintenance surface that a bash-based tool should avoid. Rejected on simplicity grounds.
+- Custom Swift binary using `UNUserNotificationCenter` — the principled modern path, but adds a build toolchain dependency and maintenance surface that a bash-based tool should avoid. Held as future option if alerter ever breaks too.
+
+### Original decision (superseded)
+
+> **Decision**: Use `terminal-notifier` (Homebrew) invoked with the `-execute <shell-command>` flag to make the banner clickable and run a callback.
+>
+> Originally rejected `alerter` because "it requires a parent process to wait on stdout and dispatch clicks; fundamentally incompatible with the fire-and-forget hook shape we need." Bring-up testing showed this concern can be accommodated cleanly with a detached subshell, and that the `-execute` callback we relied on is itself broken on macOS 26 — so the constraint flipped.
 
 ---
 
@@ -127,7 +135,9 @@ Fallback order for resolving `$TERM_BUNDLE_ID`: `$__CFBundleIdentifier` → `$TE
 
 ## 6. macOS 26+ compatibility: `-sender` bundle override
 
-**Decision**: All `terminal-notifier` invocations MUST pass `-sender com.apple.Terminal` as a hardcoded safe sender, regardless of which terminal emulator is actually hosting Claude Code. The real terminal bundle (resolved per §5b) is still used for the click callback's `open -b <bundle>` target, but it is NOT used as `-sender`. This is implemented in `lib/notify.sh` as `notify_resolve_sender_bundle()` (returns `com.apple.Terminal`), kept distinct from `notify_resolve_term_bundle()` (returns the real terminal for click activation).
+**Status (revised 2026-04-21)**: This issue is now handled implicitly by `alerter` — its `--sender` defaults to `com.apple.Terminal`, which is the safe-sender value documented below. The `notify_resolve_sender_bundle()` helper is no longer present in `lib/notify.sh` (alerter handles it). The text below is preserved as the diagnostic record of the underlying macOS 26 behavior, and remains relevant if anyone re-introduces a non-alerter notifier.
+
+**Decision (terminal-notifier era)**: All `terminal-notifier` invocations MUST pass `-sender com.apple.Terminal` as a hardcoded safe sender, regardless of which terminal emulator is actually hosting Claude Code. The real terminal bundle (resolved per §5b) is still used for the click callback's `open -b <bundle>` target, but it is NOT used as `-sender`.
 
 **Rationale**: Discovered during bring-up on macOS 26.4 (Tahoe). Two independent failure modes:
 
@@ -144,7 +154,15 @@ Fallback order for resolving `$TERM_BUNDLE_ID`: `$__CFBundleIdentifier` → `$TE
 
 **Scope note**: This workaround is invisible to the user except that the banner shows Terminal.app's icon instead of iTerm2's / Ghostty's / etc. If a future terminal-notifier release (or an official alternative) restores proper sender-bundle handling, `notify_resolve_sender_bundle` can be removed and `notify_resolve_term_bundle` used directly for both roles.
 
-## 7. macOS 26+ click callbacks broken (OPEN — blocks FR-004/FR-005)
+## 7. macOS 26+ click callbacks broken (RESOLVED — Option 2 chosen)
+
+**Resolution (2026-04-21)**: Option 2 (swap to `alerter`) was tested and works. Click callbacks dispatch correctly because `alerter`'s mechanism (block on click, print result to stdout) does not rely on macOS's broken notification-callback delivery — the alerter process stays alive owning the registration directly. Implementation is in `bin/tms-notify-hook` (detached subshell pattern with `case` on `$result`) and `lib/notify.sh:_install_hooks_probe`. The `terminal-notifier` dependency has been dropped entirely; see §1 for the revised primary-notifier decision.
+
+The remainder of this section is preserved as the empirical record of the original problem.
+
+---
+
+### Original observation (resolved by §1 revision)
 
 **Observation**: On macOS 26.4 (Tahoe), `terminal-notifier` 2.0.0 click callbacks do not dispatch, regardless of flag used. Both `-execute '<shell-cmd>'` (our primary mechanism for FR-004 click-to-switch) and `-activate '<bundle-id>'` (foreground-only fallback) silently do nothing when the user clicks the banner body. Verified empirically with two canary banners:
 
@@ -173,7 +191,7 @@ This is separate from the delivery issue documented in §6. Banners *deliver* co
 
 ## Summary of decisions feeding Phase 1
 
-- **New runtime dependencies**: `terminal-notifier` (required for emission), `jq` (required for `tms install-hooks` only; optional for the hook if a jq-free fallback JSON extractor is provided).
+- **New runtime dependencies** (revised after bring-up): `alerter` (required for emission and click dispatch — replaces `terminal-notifier` per §1 and §7), `jq` (required for `tms install-hooks` only; optional for the hook if a jq-free fallback JSON extractor is provided).
 - **Files added**: `bin/tms-notify-hook`, `lib/notify.sh`.
 - **Files modified**: `bin/tms`, `lib/session.sh` (new `cmd_switch`), `lib/config.sh` (opt-out flag accessor + validation), `config/projects.example.yml` (document `notifications.enabled: false`), `README.md`.
 - **New subcommands**: `tms switch <project>` (direct, non-interactive), `tms install-hooks` (idempotent settings.json writer).

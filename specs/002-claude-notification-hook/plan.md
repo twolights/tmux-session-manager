@@ -10,7 +10,7 @@ Add a Claude Code `Notification` hook that emits a clickable macOS banner identi
 ## Technical Context
 
 **Language/Version**: Bash 4+ (POSIX-compatible where feasible), consistent with existing `lib/*.sh` modules
-**Primary Dependencies**: tmux 3.2+, yq (Python-based), fzf, Claude Code CLI, macOS system frameworks; new dependency `terminal-notifier` (selected in Phase 0 research for clickable banner support with `-execute` callback)
+**Primary Dependencies**: tmux 3.2+, yq (Python-based), fzf, Claude Code CLI, macOS system frameworks; new dependencies `alerter` (clickable banner — selected during bring-up after macOS 26 broke `terminal-notifier`'s click callbacks; see research.md §1 and §7) and `jq` (`tms install-hooks` settings.json round-trip)
 **Storage**:
   - Config: `~/.config/tmux-session-manager/projects.yml` (YAML, existing) — extended with optional `projects[].notifications.enabled: false` flag
   - Claude Code settings: `~/.claude/settings.json` (JSON, modified by `tms install-hooks`)
@@ -18,7 +18,7 @@ Add a Claude Code `Notification` hook that emits a clickable macOS banner identi
 **Testing**: Manual scenario-based verification via `quickstart.md` (the project has no existing automated test harness; adding one is out of scope for this feature). Each acceptance scenario and each Phase 1 contract is mapped to a reproducible manual check.
 **Target Platform**: macOS (Darwin), tmux 3.2+, Claude Code CLI with hook support
 **Project Type**: Single-repo CLI tool (bash scripts + tmux configuration)
-**Performance Goals**: Hook emission adds < 100 ms at p95 to Claude Code's interaction loop (SC-005). `terminal-notifier` is invoked in a detached background subshell so the hook returns immediately regardless of notification-center latency.
+**Performance Goals**: Hook emission adds < 100 ms at p95 to Claude Code's interaction loop (SC-005). `alerter` is invoked in a detached background subshell (it blocks until click/timeout, so the subshell may live up to 60s — the parent hook returns immediately).
 **Constraints**: Hook MUST NOT block, delay, or crash Claude Code (FR-007); failures isolated via subshell + explicit exit-code swallowing; all failure paths write to the log file rather than raising. No new runtime dependencies on languages outside bash/yq stack.
 **Scale/Scope**: Single-user, single-machine; realistic upper bound ~20 concurrent tms projects. SC-004's cross-talk property is project-count-independent (each banner's click callback is baked at emission time, so no runtime routing decision exists that could disambiguate wrongly), so this feature does not have meaningful scaling concerns beyond the log volume bound (< 100 events/day typical).
 
@@ -36,7 +36,7 @@ The project's `.specify/memory/constitution.md` is an unfilled template (placeho
 
 **Gate status**: PASS (no violations; nothing to justify in Complexity Tracking).
 
-**Post-Phase 1 re-check**: PASS. Phase 1 outputs (data-model, contracts, quickstart) introduce no new architectural patterns, no additional languages, and no new dependencies beyond the single `terminal-notifier` binary selected in Phase 0 research. Plan remains within the existing bash + yq + tmux surface.
+**Post-Phase 1 re-check**: PASS. Phase 1 outputs (data-model, contracts, quickstart) introduce no new architectural patterns, no additional languages, and no new dependencies beyond the notifier binary (originally `terminal-notifier`; revised to `alerter` during bring-up — see research.md §1 and §7) and `jq`. Plan remains within the existing bash + yq + tmux surface.
 
 ## Project Structure
 

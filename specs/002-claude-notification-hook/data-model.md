@@ -68,7 +68,7 @@ The hook prefers `jq` when available (cleanest). When `jq` is absent (e.g., fres
 |---------------|--------|----------|
 | `project_name` | Resolved from `cwd` via §5a of research.md | Notification title, click callback argument, log entry |
 | `term_bundle_id` | `$__CFBundleIdentifier` → `$TERM_PROGRAM` lookup → `com.apple.Terminal` fallback | Click callback `open -b` argument |
-| `click_cmd` | `open -b <term_bundle_id> ; exec <tms-path> switch <project_name>` | `-execute` arg to `terminal-notifier` |
+| `click_cmd` | inline bash `case "$result" in @CONTENTCLICKED) open -b <bundle> ; tms switch <project> ;; esac` | dispatched in the detached subshell after `alerter` returns |
 
 **Critical invariant (FR-005, and Per-Project Notification Setting entity)**: `project_name` is resolved **at emission time**, not lazily at click time. This matters because the tms config file may change between emission and click; the user's click should land on the project that emitted the event, not on whatever project happens to map to the same `cwd` now.
 
@@ -76,29 +76,48 @@ The hook prefers `jq` when available (cleanest). When `jq` is absent (e.g., fres
 
 ## Entity: Click Action Payload
 
-The literal shell command passed to `terminal-notifier -execute`. Escaping matters because tms project names are already validated to disallow `.` and `:` (see `lib/config.sh:_config_validate`), but arbitrary shell metacharacters are NOT currently banned, so the command must be quoted defensively.
+**Revised 2026-04-21 (alerter migration)**: With `alerter`, there is no escaped shell-string callback — the click is dispatched as ordinary bash code inside the detached subshell that owns the alerter process. Variables remain bash variables (no quoting gymnastics) because no `/bin/sh -c` re-evaluation step exists.
 
-### Shape
+### Shape (in-shell, inside the detached subshell that owns alerter)
 
-```sh
-open -b 'com.googlecode.iterm2' ; \
-'/Users/ykchen/Projects/ykchen/tmux-session-manager/bin/tms' switch 'my-webapp' \
-    2>&1 | tee -a '/Users/ykchen/.local/state/tmux-session-manager/notifications.log' ; \
-[ "${PIPESTATUS[0]:-0}" -ne 0 ] && \
-    terminal-notifier \
-        -title 'Claude Code — my-webapp' \
-        -message "Session not running. Run 'tms start my-webapp' to restart it."
+```bash
+result=$(alerter \
+    --title "$project_name" \
+    --message "$message" \
+    --timeout 60 \
+    2>/dev/null) || result="@ERROR"
+
+case "$result" in
+    @CONTENTCLICKED)
+        open -b "$term_bundle_id" >/dev/null 2>&1 || true
+        switch_output=""
+        if ! switch_output=$("$tms_abs_path" switch "$project_name" 2>&1); then
+            notify_log_failure "switch-failed" "$project_name" \
+                "$notification_type" "$session_id" "$switch_output"
+            alerter \
+                --title "Claude Code — $project_name" \
+                --message "Session not running. Run 'tms start $project_name' to restart it." \
+                --timeout 10 \
+                >/dev/null 2>&1 || true
+        fi
+        ;;
+    @TIMEOUT|@CLOSED)
+        : # silent dismissal — no log entry, by design
+        ;;
+    *)
+        notify_log_failure "alerter-failed" "$project_name" \
+            "$notification_type" "$session_id" "result=$result"
+        ;;
+esac
 ```
 
 ### Construction rules
 
-- `$TMS_DIR` is resolved to an **absolute path** at emission time (same `TMS_DIR` logic as `bin/tms:6`) so the callback works regardless of `$PATH` at click time.
-- Single-quote each substituted value; inside a single-quoted value, escape embedded `'` as `'\''`.
-- The `open -b` and `tms switch` parts are separated by `;` (not `&&`) so a `tms switch` failure still foregrounds the terminal before the follow-up notifier fires.
-- `tee -a <log>` captures raw stderr for debugging; it is NOT the tab-structured log format. The structured log is populated only by `lib/notify.sh:notify_log_failure` from inside `tms-notify-hook`.
-- `[ "${PIPESTATUS[0]:-0}" -ne 0 ]` detects a non-zero exit from `tms switch` specifically (not from `tee`). This is bash-specific; terminal-notifier's `-execute` runs the callback via `/bin/sh -c`, and on macOS `/bin/sh` is bash-in-sh-compat, so `PIPESTATUS` is available. (If this ever breaks on a future macOS, wrap the callback in `bash -c '...'` explicitly.)
-- The follow-up `terminal-notifier` invocation is what makes the error **user-visible** per FR-006. Without it, the Notification Center subshell swallows stderr and the user sees no feedback about why the click didn't land them on a working session.
-- Do **not** use `exec` on the `tms switch` call (previous design) — we need to keep the shell alive to run the conditional follow-up notifier.
+- `$TMS_DIR` is resolved to an **absolute path** at hook-script entry time (same `TMS_DIR` logic as `bin/tms:6`) so `$tms_abs_path` works regardless of `$PATH`.
+- All values are bash variables in the parent hook process; the detached subshell inherits them on fork. No string-escape phase is required (this is the main UX win over the `terminal-notifier -execute` approach used pre-2026-04-21).
+- Switch failure uses structured logging via `notify_log_failure switch-failed ...` (replaces the prior `tee -a <log>` which produced unstructured raw-stderr lines in the log file).
+- The follow-up `alerter` invocation on switch failure is what makes the error **user-visible** per FR-006. Its banner is informational only (no click handler — user manually runs `tms start <project>`).
+- Click callback runs in the subshell, NOT under `/bin/sh -c`, so bash features (PIPESTATUS, `[[ ... ]]`, etc.) are available without explicit `bash -c` wrapping.
 
 **Known limitation — multi-window terminal users**: `open -b '<bundle>'` brings the terminal application to the foreground, but macOS promotes whichever window of that application was most recently active. If the user has two windows of the same emulator open (e.g., iTerm2 window A running a plain shell, window B attached to some tmux session), the `open -b` step may foreground window A while `tmux switch-client` retargets the client running in window B. The tmux session switch **does** happen; the user just may need to cycle to window B (⌘\` on macOS) to see it. This is accepted as a design tradeoff: detecting which specific window owns the retargeted tmux client would require per-emulator AppleScript (Terminal.app, iTerm2, Ghostty, Alacritty, etc. all have different scripting surfaces), and the target audience for `tms` typically runs a single terminal window per development context. Documented in README and quickstart.md per FR-008.
 
@@ -131,15 +150,16 @@ Fields are tab-separated, no embedded tabs in any field (replace `\t` in payload
 
 | Category | Trigger |
 |----------|---------|
-| `notifier-missing` | `terminal-notifier` not found on `$PATH`. One entry per hook invocation. |
-| `notifier-failed` | `terminal-notifier` exited non-zero. Note: on recent macOS, a notification suppressed by denied permission does **not** produce a non-zero exit; that case surfaces as a silent emission and is caught at install time by the probe banner (see `contracts/tms-install-hooks-cli.md` §Post-install probe), not at runtime. If a user sees no banners at runtime and the log is clean, the diagnostic is always "check System Settings → Notifications → terminal-notifier". |
+| `alerter-missing` | `alerter` not found on `$PATH`. One entry per hook invocation. |
+| `alerter-failed` | `alerter` returned an unexpected result (not `@CONTENTCLICKED` / `@TIMEOUT` / `@CLOSED`) or non-zero exit. Note: on macOS 26+, a notification suppressed by denied permission does **not** produce a non-zero exit; that case is caught at install time by the probe banner (see `contracts/tms-install-hooks-cli.md` §Post-install probe), not at runtime. If a user sees no banners at runtime and the log is clean, the diagnostic is always "check System Settings → Notifications → Terminal" (alerter delivers under Terminal's bundle by default). |
 | `no-cwd` | Payload missing `cwd`. |
 | `no-project-match` | `cwd` didn't match any configured project (graceful — spec FR-010). |
 | `parse-error` | Stdin payload malformed. |
 | `empty-message` | Payload `message` field empty. |
-| `switch-failed` | Click callback's `tms switch` step failed (captured by the `tee` in the callback shell; the user-visible signal is the follow-up `terminal-notifier` banner per data-model.md §Click Action Payload). |
+| `switch-failed` | Click callback's `tms switch` step failed (captured directly inside the detached subshell via `notify_log_failure`; the user-visible signal is the follow-up `alerter` banner per data-model.md §Click Action Payload). |
+| `hook-error` | Unexpected error trapped by the script-wide `ERR` trap; rare. |
 
-All categories log on every occurrence (they are rare by construction). There is no application-level deduplication — runtime `notifier-failed` spam is bounded by Claude Code's notification cadence, and the common "permissions never granted" case is caught once at install time rather than every event.
+All categories log on every occurrence (they are rare by construction). There is no application-level deduplication — runtime spam is bounded by Claude Code's notification cadence, and the common "permissions never granted" case is caught once at install time rather than every event.
 
 ---
 
@@ -155,12 +175,14 @@ Claude Code Notification hook stdin   (Entity: Notification Event — input)
           ▼
 tms-notify-hook                       (resolves project_name, term_bundle_id)
           │
-          ├─► terminal-notifier ... -execute <click_cmd>   (Entity: Click Action Payload)
+          ├─► detached subshell:
+          │     alerter --title <project> --message <body>     (blocks until click/timeout)
+          │     case "$result" in @CONTENTCLICKED) ... esac    (Entity: Click Action Payload)
           │
           └─► notifications.log        (Entity: Notification Failure Log Entry)
                 (on failure paths only; silent opt-out does NOT log)
 
-click → open -b <bundle> ; tms switch <project>
+@CONTENTCLICKED → open -b <bundle> ; tms switch <project>
                                       (Entity: Click Action Payload — executed)
                                       │
                                       ├─► tmux switch-client / attach

@@ -5,17 +5,16 @@
 
 This document is both the user-facing install guide and the manual verification recipe. Because the repo has no automated test harness, each numbered scenario below maps to an acceptance criterion in `spec.md` and each branch of the contracts in `contracts/`.
 
-> **⚠️ macOS 26+ (Tahoe) — click-to-switch currently blocked**  
-> Banner *delivery* works end-to-end (QS-2, QS-5, QS-6, QS-7 pass). Banner *click callbacks* (`-execute`, `-activate`) do not dispatch on macOS 26 — a macOS-side restriction on unsigned notification handlers, not a bug in tms. QS-3 and QS-4 are therefore currently failing on macOS 26 pending a remediation decision (see [research.md §7](research.md) for the three options under review). On pre-macOS-26, all scenarios pass.
-
 ---
 
 ## Prerequisites (one-time per machine)
 
 ```bash
-brew install terminal-notifier jq
+brew install alerter jq
 # tmux, yq, fzf already required by tms
 ```
+
+> **macOS 26+ note**: `alerter` was chosen as the notifier (over `terminal-notifier`) because `terminal-notifier`'s click callbacks no longer dispatch on macOS 26 — see [research.md §7](research.md). Banner delivery + click-to-switch both work with `alerter`.
 
 Then, from the repo root on branch `002-claude-notification-hook`:
 
@@ -25,7 +24,7 @@ tms install-hooks
 
 This writes one entry to `~/.claude/settings.json` under `hooks.Notification`. Re-running `tms install-hooks` is idempotent.
 
-`tms install-hooks` runs a probe banner at the end of install that triggers macOS's permission prompt for `terminal-notifier`. Click **Allow**. If you dismiss the prompt or miss the banner, the install output includes explicit instructions to open **System Settings → Notifications → terminal-notifier** and enable it there. See QS-13 for the full probe verification recipe.
+`tms install-hooks` runs a probe banner at the end of install that triggers macOS's permission prompt for **Terminal** (alerter delivers under Terminal's bundle for macOS 26+ compatibility — see research.md §6). Click **Allow**. If you dismiss the prompt or miss the banner, the install output includes explicit instructions to open **System Settings → Notifications → Terminal** and enable it there. See QS-13 for the full probe verification recipe.
 
 To remove: `tms install-hooks --uninstall`.
 
@@ -240,11 +239,11 @@ echo '{"hook_event_name":"Notification","message":"hello"}' | bin/tms-notify-hoo
 
 ---
 
-### QS-12: terminal-notifier missing
+### QS-12: alerter missing
 
-**Covers**: contracts/tms-notify-hook-stdin.md `notifier-missing` branch; FR-007.
+**Covers**: contracts/tms-notify-hook-stdin.md `alerter-missing` branch; FR-007.
 
-Temporarily shadow `terminal-notifier` out of `$PATH` and invoke the hook with a valid payload:
+Temporarily shadow `alerter` out of `$PATH` and invoke the hook with a valid payload:
 
 ```bash
 PATH="/usr/bin:/bin" echo '{
@@ -254,7 +253,7 @@ PATH="/usr/bin:/bin" echo '{
 }' | bin/tms-notify-hook
 ```
 
-**Expect**: exit 0; `notifier-missing` log entry. Claude Code would continue unblocked.
+**Expect**: exit 0; `alerter-missing` log entry. Claude Code would continue unblocked.
 
 ---
 
@@ -264,16 +263,16 @@ PATH="/usr/bin:/bin" echo '{
 
 This scenario verifies that the feature catches the "permissions never granted" setup proactively at install time rather than attempting runtime detection.
 
-1. Ensure `terminal-notifier` has no existing Notification Center permission entry (first-time-ever state). If you've used the tool before, open System Settings → Notifications, find `terminal-notifier`, and delete its entry; then `killall NotificationCenter`.
+1. Ensure **Terminal** has no existing Notification Center permission entry (first-time-ever state). If you've used Terminal-based notifications before, open System Settings → Notifications, find `Terminal`, and delete or disable its entry; then `killall NotificationCenter`.
 2. Run `tms install-hooks`.
 
 **Expect**:
 1. The install writes the settings.json entry as in QS-1.
-2. macOS prompts you to allow notifications for `terminal-notifier`. Click Allow.
+2. macOS prompts you to allow notifications for **Terminal** (alerter delivers under Terminal's bundle for macOS 26+ compatibility — see research.md §6). Click Allow.
 3. A probe banner titled `tms` with body `Notification hook installed. You should see this banner.` appears.
-4. The install output includes the full diagnostic block per contracts/tms-install-hooks-cli.md §Post-install probe, pointing at System Settings → Notifications → terminal-notifier and the absolute path of `notifications.log`.
+4. The install output includes the full diagnostic block per contracts/tms-install-hooks-cli.md §Post-install probe, pointing at System Settings → Notifications → Terminal and the absolute path of `notifications.log`.
 
-Then deliberately deny the permission (System Settings → Notifications → terminal-notifier → Allow Notifications off) and run `tms install-hooks` again (it's idempotent and re-runs the probe):
+Then deliberately deny the permission (System Settings → Notifications → Terminal → Allow Notifications off) and run `tms install-hooks` again (it's idempotent and re-runs the probe):
 
 **Expect**: same install output as above, but no banner appears. The printed diagnostic tells the user exactly where to look to fix it. `notifications.log` does NOT receive a `permission-denied` entry — by design, runtime detection was removed in favor of this install-time check.
 

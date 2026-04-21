@@ -3,7 +3,7 @@
 Auto-generated from all feature plans. Last updated: 2026-04-21
 
 ## Active Technologies
-- Bash 4+ (POSIX-compatible where feasible), consistent with existing `lib/*.sh` modules + tmux 3.2+, yq (Python-based), fzf, Claude Code CLI, macOS system frameworks; new dependency `terminal-notifier` (selected in Phase 0 research for clickable banner support with `-execute` callback) (002-claude-notification-hook)
+- Bash 4+ (POSIX-compatible where feasible), consistent with existing `lib/*.sh` modules + tmux 3.2+, yq (Python-based), fzf, Claude Code CLI, macOS system frameworks; new dependencies `alerter` (clickable banner — chosen after macOS 26 made `terminal-notifier`'s click callbacks non-functional, see specs/002-.../research.md §7) and `jq` (settings.json round-trip) (002-claude-notification-hook)
 
 - Bash (POSIX-compatible where possible, bash 4+ for associative arrays) + tmux 3.2+, neovim, Claude Code CLI, yq (Python-based), fzf (001-tmux-session-manager)
 
@@ -37,7 +37,7 @@ Bash (POSIX-compatible where possible, bash 4+ for associative arrays): Follow s
 - Keybindings are auto-loaded by `tms start` and guarded with `@tms` session option.
 
 ## Recent Changes
-- 002-claude-notification-hook: Added Bash 4+ (POSIX-compatible where feasible), consistent with existing `lib/*.sh` modules + tmux 3.2+, yq (Python-based), fzf, Claude Code CLI, macOS system frameworks; new dependency `terminal-notifier` (selected in Phase 0 research for clickable banner support with `-execute` callback)
+- 002-claude-notification-hook: Added clickable macOS notifications via `alerter` (after bring-up testing on macOS 26.4 showed `terminal-notifier`'s `-execute` click callbacks no longer dispatch on recent macOS — `alerter` blocks until click and prints `@CONTENTCLICKED` to stdout, sidestepping the broken callback path); new dependencies `alerter` + `jq`
 
 - Auto-loaded keybindings with fzf session switcher (no .tmux.conf needed)
 - Window layout: servers at window 0, workspace at window 1

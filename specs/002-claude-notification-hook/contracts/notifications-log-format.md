@@ -17,7 +17,7 @@
 One event per line. Fields tab-separated (`\t`, literal 0x09). Fields MUST NOT contain embedded tabs — writers replace any inbound `\t` with a single space before composing the line. Example:
 
 ```text
-2026-04-21T17:52:03+08:00	notifier-failed	my-webapp	permission_prompt	abc-123	Claude needs your permission to run: git push
+2026-04-21T17:52:03+08:00	alerter-failed	my-webapp	permission_prompt	abc-123	Claude needs your permission to run: git push
 ```
 
 ### Fields (in order)
@@ -35,13 +35,14 @@ One event per line. Fields tab-separated (`\t`, literal 0x09). Fields MUST NOT c
 
 See data-model.md §Notification Failure Log Entry for full list with triggers. Reproduced here for reader convenience:
 
-- `notifier-missing`
-- `notifier-failed` (covers all terminal-notifier non-zero exits; silent permission denial is caught at install time, not runtime — see `contracts/tms-install-hooks-cli.md` §Post-install probe)
+- `alerter-missing`
+- `alerter-failed` (covers unexpected alerter results / non-zero exits; silent permission denial is caught at install time, not runtime — see `contracts/tms-install-hooks-cli.md` §Post-install probe)
 - `no-cwd`
 - `no-project-match`
 - `parse-error`
 - `empty-message`
-- `switch-failed` (written by click callback's `tee`, not the hook itself)
+- `switch-failed` (written by the click callback inside the detached subshell via `notify_log_failure`)
+- `hook-error` (script-wide ERR trap; rare)
 
 ### Extensibility
 
@@ -58,4 +59,4 @@ Humans are the primary readers. The `tms` CLI does NOT provide a subcommand for 
 
 ## Manual test mapping
 
-Covered by quickstart.md scenarios QS-7 (no-project-match entry), QS-10 (parse-error entry), QS-12 (notifier-missing entry).
+Covered by quickstart.md scenarios QS-7 (no-project-match entry), QS-10 (parse-error entry), QS-12 (alerter-missing entry).
