@@ -18,6 +18,22 @@ config_load() {
     _config_validate
 }
 
+# Lightweight config load — sets CONFIG_FILE and verifies syntactic validity
+# but skips _config_validate's per-project structural checks. Cost: ~2 yq
+# calls vs ~5N+1 in config_load. Use on hot paths (notification click →
+# tms switch) where errors are tolerable as long as the malformed-config
+# case is still surfaced via a fallback to _config_validate when lookups
+# fail (see config_project_exists_or_validate).
+config_load_lite() {
+    CONFIG_FILE="$(config_file)"
+    if [[ ! -f "$CONFIG_FILE" ]]; then
+        die "configuration file not found at $CONFIG_FILE"
+    fi
+    if ! yq '.' "$CONFIG_FILE" &>/dev/null; then
+        die "configuration file is not valid YAML: $CONFIG_FILE"
+    fi
+}
+
 # Validate config structure and constraints
 _config_validate() {
     local count
@@ -97,6 +113,35 @@ _config_validate() {
             done
         fi
     done
+}
+
+# Single-yq-call existence check for a project name. Returns 0 if found,
+# 1 otherwise. Avoids _config_project_index's per-project iteration loop
+# (one yq invocation per project). Use on hot paths.
+config_project_exists() {
+    local target="$1"
+    [[ -z "$target" ]] && return 1
+    local found
+    found=$(yq -r --arg name "$target" '.projects[]? | select(.name == $name) | .name' "$CONFIG_FILE" 2>/dev/null | head -1)
+    [[ "$found" == "$target" ]]
+}
+
+# Lookup-with-fallback: if config_project_exists returns false, run full
+# validation (_config_validate) so a malformed config dies with the precise
+# original-quality error before we report "not found". Returns 0 if the
+# project exists; returns 1 (via die in _config_validate, or explicitly)
+# otherwise. Caller still needs to die on the 1 return for the genuine
+# not-found case.
+config_project_exists_or_validate() {
+    local target="$1"
+    if config_project_exists "$target"; then
+        return 0
+    fi
+    # Lite check failed — could be missing project OR malformed config.
+    # Surface any structural error first; if validation passes, the
+    # project is genuinely not registered.
+    _config_validate
+    return 1
 }
 
 # Get the index of a project by name. Returns "" if not found.
