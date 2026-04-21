@@ -57,6 +57,18 @@ _config_validate() {
         fi
         seen_names+=("$name")
 
+        # Validate optional notifications block (type-check only; absent is OK).
+        # Python-based yq emits JSON types as quoted strings: "null", "object", "boolean".
+        local notif_type notif_enabled_type
+        notif_type=$(yq ".projects[$i].notifications | type" "$CONFIG_FILE")
+        if [[ "$notif_type" != '"null"' ]] && [[ "$notif_type" != '"object"' ]]; then
+            die "project '$name' notifications must be a map"
+        fi
+        notif_enabled_type=$(yq ".projects[$i].notifications.enabled | type" "$CONFIG_FILE")
+        if [[ "$notif_enabled_type" != '"null"' ]] && [[ "$notif_enabled_type" != '"boolean"' ]]; then
+            die "project '$name' notifications.enabled must be a bool"
+        fi
+
         # Validate servers if present
         local server_count
         server_count=$(yq ".projects[$i].servers | length" "$CONFIG_FILE")
@@ -158,6 +170,20 @@ config_get_server_cmd() {
     local idx
     idx=$(_config_project_index "$project") || return 1
     yq -r ".projects[$idx].servers[$server_idx].cmd" "$CONFIG_FILE"
+}
+
+# Get per-project notification opt-out state. Prints "true" or "false".
+# Absent field → "true" (global-on default per FR-011).
+config_get_notifications_enabled() {
+    local idx
+    idx=$(_config_project_index "$1") || return 1
+    local val
+    val=$(yq -r ".projects[$idx].notifications.enabled" "$CONFIG_FILE")
+    if [[ "$val" == "null" ]] || [[ -z "$val" ]]; then
+        printf '%s\n' "true"
+    else
+        printf '%s\n' "$val"
+    fi
 }
 
 # Get server dir by project name and server index (returns project dir if not set)

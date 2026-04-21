@@ -18,6 +18,10 @@ Each project gets a tmux session with:
 - [yq](https://kislyuk.github.io/yq/) (Python-based YAML/jq wrapper: `pip install yq`)
 - [fzf](https://github.com/junegunn/fzf) (fuzzy finder for session switching)
 
+**For Claude Code notification banners** (optional — see [Enabling Claude Code notifications](#enabling-claude-code-notifications)):
+- [alerter](https://github.com/vjeantet/alerter): `brew install alerter`
+- [jq](https://jqlang.github.io/jq/): `brew install jq`
+
 ## Installation
 
 ```bash
@@ -45,6 +49,8 @@ Key bindings are loaded automatically when you run `tms start` -- no `.tmux.conf
 tms start <project>    # Launch or attach to a project workspace
 tms stop <project>     # Stop a project session
 tms list               # Show all projects with status
+tms switch <project>   # Switch the active tmux session to the project (non-interactive)
+tms install-hooks      # Install the Claude Code Notification hook (see below)
 tms help               # Show usage
 ```
 
@@ -132,6 +138,53 @@ projects:
 | `dir` | No | Working directory override (defaults to project dir) |
 
 The config directory can be overridden with the `TMS_CONFIG_DIR` environment variable.
+
+## Enabling Claude Code notifications
+
+tms can show clickable macOS notification banners when Claude Code needs your attention, and clicking a banner switches your tmux session to the originating project.
+
+### Setup
+
+```bash
+# Install dependencies (one-time)
+brew install alerter jq
+
+# Register the hook with Claude Code
+tms install-hooks
+```
+
+`tms install-hooks` writes the hook entry to `~/.claude/settings.json` and fires a test banner to confirm macOS notification permissions are granted. If macOS prompts you to allow notifications for **Terminal**, click **Allow** (alerter delivers under Terminal's bundle for macOS 26+ compatibility — see [research notes](specs/002-claude-notification-hook/research.md#6-macos-26-compatibility-sender-bundle-override)). If you miss the prompt or the banner doesn't appear, open **System Settings → Notifications → Terminal** and enable notifications there.
+
+Re-running `tms install-hooks` is idempotent. To remove the hook: `tms install-hooks --uninstall`.
+
+### Per-project opt-out
+
+To disable banners for a specific project, add `notifications: { enabled: false }` to that project's entry in `projects.yml`:
+
+```yaml
+projects:
+  - name: my-webapp
+    dir: ~/Projects/my-webapp
+    notifications:
+      enabled: false   # suppress macOS banners for this project only
+```
+
+The visual bell in tmux continues to fire regardless of this setting.
+
+### Diagnostic log
+
+Failed notifications are logged to:
+```
+~/.local/state/tmux-session-manager/notifications.log
+```
+
+Override the directory with `TMS_STATE_DIR` or `XDG_STATE_HOME`.
+
+### Known limitation — multiple terminal windows
+
+If you have two or more windows of the same terminal emulator open, clicking the banner foregrounds the application but macOS chooses whichever window was most recently active as the frontmost OS window. The tmux client in any other window *does* get retargeted to the correct project, but it may be hidden behind the frontmost window — cycle windows (⌘\` on macOS) to find it. Single-window users are unaffected.
+
+For the full verification recipe, see [`specs/002-claude-notification-hook/quickstart.md`](specs/002-claude-notification-hook/quickstart.md).
 
 ## License
 
