@@ -259,6 +259,13 @@ cmd_notify_hook() (
     local log_path
     log_path=$(notify_log_path)
 
+    # Resolve the notification sound (per-project → global → silent).
+    # If non-empty, pass to alerter via --sound. alerter accepts macOS
+    # system sound names (Basso, Glass, Submarine, Tink, etc.) or
+    # "default" for the system notification sound.
+    local notif_sound=""
+    notif_sound=$(config_get_notifications_sound "$project_name" 2>/dev/null || printf '')
+
     # --- emit notification + dispatch click in a detached subshell ---
     # alerter blocks until user interaction or --timeout, then prints the
     # result to stdout. We background the whole sequence so the hook
@@ -269,11 +276,15 @@ cmd_notify_hook() (
     # dispatch on recent macOS; see specs/002-.../research.md §7).
     (
         local result
-        result=$(alerter \
-            --title "$project_name" \
-            --message "$message" \
-            --timeout 60 \
-            2>/dev/null) || result="@ERROR"
+        local -a alerter_args=(
+            --title "$project_name"
+            --message "$message"
+            --timeout 60
+        )
+        if [[ -n "$notif_sound" ]]; then
+            alerter_args+=(--sound "$notif_sound")
+        fi
+        result=$(alerter "${alerter_args[@]}" 2>/dev/null) || result="@ERROR"
 
         case "$result" in
             @CONTENTCLICKED)

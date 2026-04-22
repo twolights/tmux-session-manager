@@ -43,6 +43,18 @@ _config_validate() {
         die "no projects defined in $CONFIG_FILE"
     fi
 
+    # Validate optional top-level notifications block (global defaults).
+    # Siblings of `projects:`. Absent is OK.
+    local gnotif_type gsound_type
+    gnotif_type=$(yq '.notifications | type' "$CONFIG_FILE")
+    if [[ "$gnotif_type" != '"null"' ]] && [[ "$gnotif_type" != '"object"' ]]; then
+        die "top-level 'notifications' must be a map"
+    fi
+    gsound_type=$(yq '.notifications.sound | type' "$CONFIG_FILE")
+    if [[ "$gsound_type" != '"null"' ]] && [[ "$gsound_type" != '"string"' ]]; then
+        die "top-level 'notifications.sound' must be a string"
+    fi
+
     local seen_names=()
     local i name dir
 
@@ -83,6 +95,11 @@ _config_validate() {
         notif_enabled_type=$(yq ".projects[$i].notifications.enabled | type" "$CONFIG_FILE")
         if [[ "$notif_enabled_type" != '"null"' ]] && [[ "$notif_enabled_type" != '"boolean"' ]]; then
             die "project '$name' notifications.enabled must be a bool"
+        fi
+        local notif_sound_type
+        notif_sound_type=$(yq ".projects[$i].notifications.sound | type" "$CONFIG_FILE")
+        if [[ "$notif_sound_type" != '"null"' ]] && [[ "$notif_sound_type" != '"string"' ]]; then
+            die "project '$name' notifications.sound must be a string"
         fi
 
         # Validate servers if present
@@ -229,6 +246,36 @@ config_get_notifications_enabled() {
     else
         printf '%s\n' "$val"
     fi
+}
+
+# Get the notification sound for a project. Precedence:
+#   1. projects[idx].notifications.sound is present → use it
+#      (including explicit empty string, which means "silent").
+#   2. Else top-level notifications.sound → use it.
+#   3. Else → empty string (silent).
+# "Present" means the YAML key exists, even if the value is "".
+# yq reports absent keys as "null" and empty-string values as the empty
+# string — so we distinguish the two by checking the raw value against
+# the literal string "null".
+config_get_notifications_sound() {
+    local idx
+    idx=$(_config_project_index "$1") || return 1
+    local proj_raw
+    proj_raw=$(yq -r ".projects[$idx].notifications.sound" "$CONFIG_FILE")
+    if [[ "$proj_raw" != "null" ]]; then
+        # Field is present at the project level (empty string = explicit silence).
+        printf '%s\n' "$proj_raw"
+        return 0
+    fi
+    # Fall through to global.
+    local global_raw
+    global_raw=$(yq -r '.notifications.sound' "$CONFIG_FILE")
+    if [[ "$global_raw" != "null" ]]; then
+        printf '%s\n' "$global_raw"
+        return 0
+    fi
+    # Nothing set anywhere — silent.
+    printf '%s\n' ""
 }
 
 # Get server dir by project name and server index (returns project dir if not set)

@@ -192,6 +192,33 @@ projects:
 
 The visual bell in tmux continues to fire regardless of this setting.
 
+### Notification sound
+
+Configure a macOS system sound to play with each banner. Set once globally (applied to every project) and/or per-project to override or silence.
+
+```yaml
+# Global default — every project inherits this unless it sets its own.
+notifications:
+  sound: "Submarine"   # any macOS system sound name, or "default"
+
+projects:
+  - name: critical-app
+    dir: ~/Projects/critical-app
+    notifications:
+      sound: "Sosumi"   # per-project override
+
+  - name: silent-app
+    dir: ~/Projects/silent-app
+    notifications:
+      sound: ""         # explicit silence (overrides the global default)
+
+  - name: inherits-default
+    dir: ~/Projects/whatever
+    # no sound key → inherits "Submarine"
+```
+
+Sound names are macOS system sounds (case-sensitive): `Basso`, `Blow`, `Bottle`, `Frog`, `Funk`, `Glass`, `Hero`, `Morse`, `Ping`, `Pop`, `Purr`, `Sosumi`, `Submarine`, `Tink`. Use `"default"` for the system default notification sound. Absent field (neither global nor per-project) means silent.
+
 ### Diagnostic log
 
 Failed notifications are logged to:
