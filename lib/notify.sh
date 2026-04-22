@@ -170,15 +170,17 @@ cmd_notify_hook() (
     trap '_hook_error_handler' ERR
 
     # --- read stdin ---
-    # read returns 1 on EOF-without-newline but still fills the variable — don't clear it.
+    # Use `cat` to read the entire payload to EOF. Earlier versions used a
+    # `read -r` + `while read -t 0.1` pattern, which silently truncated
+    # pretty-printed multi-line JSON: `read` captured the first line (just
+    # "{" when Claude Code pretty-prints), and the 100ms timeout on the
+    # loop often fired before subsequent lines arrived — leaving the
+    # payload as just "{" and producing a parse-error. `cat` reads to EOF
+    # atomically and has no per-line timeout. The outer `timeout 5`
+    # bounds total reading in case stdin never closes (defense in depth;
+    # Claude Code always closes the pipe under normal operation).
     local payload=""
-    IFS= read -r -t 5 payload 2>/dev/null || true
-
-    # Collect any remaining lines (multi-line payloads)
-    local _line
-    while IFS= read -r -t 0.1 _line 2>/dev/null; do
-        payload="${payload}${_line}"
-    done || true
+    payload=$(timeout 5 cat 2>/dev/null || printf '')
 
     # --- parse-error branch ---
     if [[ -z "$payload" ]]; then
