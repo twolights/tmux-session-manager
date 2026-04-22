@@ -170,17 +170,16 @@ cmd_notify_hook() (
     trap '_hook_error_handler' ERR
 
     # --- read stdin ---
-    # Use `cat` to read the entire payload to EOF. Earlier versions used a
-    # `read -r` + `while read -t 0.1` pattern, which silently truncated
-    # pretty-printed multi-line JSON: `read` captured the first line (just
-    # "{" when Claude Code pretty-prints), and the 100ms timeout on the
-    # loop often fired before subsequent lines arrived — leaving the
-    # payload as just "{" and producing a parse-error. `cat` reads to EOF
-    # atomically and has no per-line timeout. The outer `timeout 5`
-    # bounds total reading in case stdin never closes (defense in depth;
-    # Claude Code always closes the pipe under normal operation).
+    # `cat` reads to EOF. Prior implementations tried to add a timeout
+    # wrapper (`timeout 5 cat`) for defense-in-depth against a never-
+    # closing pipe, but `timeout` is GNU coreutils — NOT on the typical
+    # restricted PATH (e.g. /usr/bin:/bin) that Claude Code uses when
+    # spawning hooks. When `timeout` isn't found, the wrapper silently
+    # returned empty, dropping every payload. Claude Code's
+    # `timeout: 10` in settings.json already bounds total hook runtime
+    # server-side, so an inner timeout isn't needed anyway.
     local payload=""
-    payload=$(timeout 5 cat 2>/dev/null || printf '')
+    payload=$(cat)
 
     # --- parse-error branch ---
     if [[ -z "$payload" ]]; then
