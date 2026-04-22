@@ -50,6 +50,12 @@ session_create() {
     # Right pane (pane 1): launch Claude Code
     tmux send-keys -t "${session_name}:workspace.1" 'claude --continue' Enter
 
+    # Tag the panes by role so `tms switch` can route to the right pane
+    # even after the user swaps or rearranges them. pane_title travels
+    # with the pane across swap-pane / break-pane operations.
+    tmux select-pane -t "${session_name}:workspace.0" -T 'editor'
+    tmux select-pane -t "${session_name}:workspace.1" -T 'claude'
+
     # Select the left (editor) pane as active
     tmux select-pane -t "${session_name}:workspace.0"
 
@@ -123,8 +129,23 @@ cmd_switch() {
         fi
     fi
 
-    # Always land on workspace window (FR-004)
+    # Always land on workspace window (FR-004) and the Claude Code pane.
+    # Match pane_title case-insensitively against /claude/ — this catches
+    # both our session_create tag ("claude") and Claude Code's own
+    # runtime title ("✳ Claude Code"), so the routing works whether or
+    # not claude is actively running. pane_title also travels with the
+    # pane across swap-pane / break-pane. Falls back to pane 1 (the
+    # session_create default) when nothing matches, then to whatever
+    # tmux naturally focuses.
     tmux select-window -t "${project}:workspace"
+    local claude_pane
+    claude_pane=$(tmux list-panes -t "${project}:workspace" -F '#{pane_index}	#{pane_title}' 2>/dev/null \
+        | awk -F'\t' 'tolower($2) ~ /claude/ { print $1; exit }')
+    if [[ -n "$claude_pane" ]]; then
+        tmux select-pane -t "${project}:workspace.${claude_pane}" 2>/dev/null || true
+    else
+        tmux select-pane -t "${project}:workspace.1" 2>/dev/null || true
+    fi
 }
 
 # cmd_list — show all configured projects with running status
