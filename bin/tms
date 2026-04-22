@@ -66,6 +66,9 @@ Usage:
   tms install-hooks      Install or remove the Claude Code Notification hook
                            [--uninstall]  Remove the hook
                            [--dry-run]    Preview changes without writing
+  tms test-hooks         Fire a synthetic Notification event to test the pipeline
+                           [--message <t>]  Custom banner body
+                           [--project <n>]  Test against a specific project (bypasses cwd)
   tms help               Show this help message
 
 Options:
@@ -112,6 +115,9 @@ case "$cmd" in
         ;;
     install-hooks)
         cmd_install_hooks "$@"
+        ;;
+    test-hooks)
+        cmd_test_hooks "$@"
         ;;
     notify-hook)
         # Internal subcommand invoked by Claude Code's Notification hook.

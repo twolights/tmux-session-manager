@@ -315,6 +315,94 @@ cmd_notify_hook() (
     exit 0
 )
 
+# --- test notification hook ----------------------------------------------
+
+# cmd_test_hooks [--message <text>] [--project <name>]
+#
+# Fire a synthetic Claude Code Notification payload through cmd_notify_hook
+# so the user can verify the full pipeline (banner delivery, sound, click-
+# to-switch eligibility) without waiting for a real Claude Code event.
+# Prints the resolved project + settings so the user can see what got
+# applied before the banner appears.
+cmd_test_hooks() {
+    local message="tms notification test — if you see this banner, hooks work."
+    local override_project=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --message=*)  message="${1#--message=}" ;;
+            --message)    shift; message="${1:-}" ;;
+            --project=*)  override_project="${1#--project=}" ;;
+            --project)    shift; override_project="${1:-}" ;;
+            *) die "unknown option '$1'. Usage: tms test-hooks [--message <text>] [--project <name>]" ;;
+        esac
+        shift || true
+    done
+
+    require_cmd alerter "brew install alerter"
+    require_cmd jq "brew install jq"
+
+    # Use config_load (full validation) so any malformed config surfaces
+    # cleanly before the hook runs.
+    config_load
+
+    # Resolve project — either the user-supplied override, or via cwd.
+    local project_name="" cwd="$PWD"
+    if [[ -n "$override_project" ]]; then
+        if ! config_project_exists "$override_project"; then
+            die "project '$override_project' not found in configuration"
+        fi
+        project_name="$override_project"
+        cwd=$(config_get_project_dir "$project_name")
+    else
+        project_name=$(notify_resolve_project_from_cwd "$cwd" 2>/dev/null || printf '')
+    fi
+
+    # Print what got resolved so the user sees the effective settings
+    # *before* the banner fires (handy for debugging "why no sound?").
+    printf 'Test notification pipeline:\n'
+    printf '    cwd:     %s\n' "$cwd"
+    if [[ -n "$project_name" ]]; then
+        printf '    project: %s\n' "$project_name"
+        local enabled sound
+        enabled=$(config_get_notifications_enabled "$project_name" 2>/dev/null || printf 'true')
+        sound=$(config_get_notifications_sound "$project_name" 2>/dev/null || printf '')
+        printf '    enabled: %s' "$enabled"
+        if [[ "$enabled" == "false" ]]; then
+            printf '  (banner will be suppressed — project has opted out)'
+        fi
+        printf '\n'
+        if [[ -n "$sound" ]]; then
+            printf '    sound:   %s\n' "$sound"
+        else
+            printf '    sound:   (none — silent)\n'
+        fi
+    else
+        printf '    project: (no match — hook will emit a plain banner, no click-to-switch)\n'
+    fi
+    printf '    message: %s\n' "$message"
+    printf '\nFiring hook...\n'
+
+    # Build a JSON payload matching Claude Code's Notification schema.
+    # Using jq to get proper escaping for the message/cwd fields.
+    local payload
+    payload=$(jq -n \
+        --arg cwd "$cwd" \
+        --arg msg "$message" \
+        '{
+            hook_event_name: "Notification",
+            cwd: $cwd,
+            message: $msg,
+            notification_type: "idle_prompt",
+            session_id: "tms-test"
+        }')
+
+    printf '%s' "$payload" | cmd_notify_hook
+    local rc=$?
+
+    printf 'Hook returned exit=%d. Banner should appear within a second.\n' "$rc"
+    printf 'If nothing appears, check the diagnostic log:\n    %s\n' "$(notify_log_path)"
+}
+
 # --- install / uninstall hooks -------------------------------------------
 
 # cmd_install_hooks [--uninstall] [--dry-run]
