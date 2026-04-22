@@ -109,8 +109,11 @@ These bindings are auto-loaded and only active in tms sessions:
 |--------------|--------------------------------------------------|
 | `prefix + P` | Switch between tms projects (fzf popup)          |
 | `prefix + S` | Toggle between workspace and server logs window  |
+| `prefix + L` | Toggle to the last-used session (native tmux)    |
 | `ctrl-z`     | Suspend neovim to drop to shell                  |
 | `fg`         | Resume neovim                                    |
+
+`prefix + L` is tmux's built-in last-session toggle — press it once to jump to the previously-active session, press again to come back. Useful for quickly pivoting between two projects you're actively working on without reaching for the fzf picker.
 
 ### Session layout
 
