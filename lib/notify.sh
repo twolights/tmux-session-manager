@@ -170,15 +170,17 @@ cmd_notify_hook() (
     trap '_hook_error_handler' ERR
 
     # --- read stdin ---
-    # read returns 1 on EOF-without-newline but still fills the variable — don't clear it.
+    # Use `cat` to read the entire payload to EOF. Earlier versions used a
+    # `read -r` + `while read -t 0.1` pattern, which silently truncated
+    # pretty-printed multi-line JSON: `read` captured the first line (just
+    # "{" when Claude Code pretty-prints), and the 100ms timeout on the
+    # loop often fired before subsequent lines arrived — leaving the
+    # payload as just "{" and producing a parse-error. `cat` reads to EOF
+    # atomically and has no per-line timeout. The outer `timeout 5`
+    # bounds total reading in case stdin never closes (defense in depth;
+    # Claude Code always closes the pipe under normal operation).
     local payload=""
-    IFS= read -r -t 5 payload 2>/dev/null || true
-
-    # Collect any remaining lines (multi-line payloads)
-    local _line
-    while IFS= read -r -t 0.1 _line 2>/dev/null; do
-        payload="${payload}${_line}"
-    done || true
+    payload=$(timeout 5 cat 2>/dev/null || printf '')
 
     # --- parse-error branch ---
     if [[ -z "$payload" ]]; then
@@ -259,6 +261,13 @@ cmd_notify_hook() (
     local log_path
     log_path=$(notify_log_path)
 
+    # Resolve the notification sound (per-project → global → silent).
+    # If non-empty, pass to alerter via --sound. alerter accepts macOS
+    # system sound names (Basso, Glass, Submarine, Tink, etc.) or
+    # "default" for the system notification sound.
+    local notif_sound=""
+    notif_sound=$(config_get_notifications_sound "$project_name" 2>/dev/null || printf '')
+
     # --- emit notification + dispatch click in a detached subshell ---
     # alerter blocks until user interaction or --timeout, then prints the
     # result to stdout. We background the whole sequence so the hook
@@ -267,13 +276,25 @@ cmd_notify_hook() (
     # On dismissal/timeout we exit silently. This is the macOS 26+-
     # compatible click mechanism (terminal-notifier's -execute does not
     # dispatch on recent macOS; see specs/002-.../research.md §7).
+    #
+    # --timeout 0 (no auto-close) so macOS's per-app "Persistent" alert
+    # style preference (System Settings → Notifications → Terminal) is
+    # honored end-to-end. A non-zero --timeout would force-close the
+    # banner after that window, overriding the user's persistence
+    # preference. The tradeoff is that alerter processes stay alive
+    # until the user clicks or dismisses; lightweight by design, bounded
+    # by human notification cadence.
     (
         local result
-        result=$(alerter \
-            --title "$project_name" \
-            --message "$message" \
-            --timeout 60 \
-            2>/dev/null) || result="@ERROR"
+        local -a alerter_args=(
+            --title "$project_name"
+            --message "$message"
+            --timeout 0
+        )
+        if [[ -n "$notif_sound" ]]; then
+            alerter_args+=(--sound "$notif_sound")
+        fi
+        result=$(alerter "${alerter_args[@]}" 2>/dev/null) || result="@ERROR"
 
         case "$result" in
             @CONTENTCLICKED)
@@ -304,7 +325,147 @@ cmd_notify_hook() (
     exit 0
 )
 
+# --- test notification hook ----------------------------------------------
+
+# cmd_test_hooks [--message <text>] [--project <name>]
+#
+# Fire a synthetic Claude Code Notification payload through cmd_notify_hook
+# so the user can verify the full pipeline (banner delivery, sound, click-
+# to-switch eligibility) without waiting for a real Claude Code event.
+# Prints the resolved project + settings so the user can see what got
+# applied before the banner appears.
+cmd_test_hooks() {
+    local message="tms notification test — if you see this banner, hooks work."
+    local override_project=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --message=*)  message="${1#--message=}" ;;
+            --message)    shift; message="${1:-}" ;;
+            --project=*)  override_project="${1#--project=}" ;;
+            --project)    shift; override_project="${1:-}" ;;
+            *) die "unknown option '$1'. Usage: tms test-hooks [--message <text>] [--project <name>]" ;;
+        esac
+        shift || true
+    done
+
+    require_cmd alerter "brew install alerter"
+    require_cmd jq "brew install jq"
+
+    # Use config_load (full validation) so any malformed config surfaces
+    # cleanly before the hook runs.
+    config_load
+
+    # Resolve project — either the user-supplied override, or via cwd.
+    local project_name="" cwd="$PWD"
+    if [[ -n "$override_project" ]]; then
+        if ! config_project_exists "$override_project"; then
+            die "project '$override_project' not found in configuration"
+        fi
+        project_name="$override_project"
+        cwd=$(config_get_project_dir "$project_name")
+    else
+        project_name=$(notify_resolve_project_from_cwd "$cwd" 2>/dev/null || printf '')
+    fi
+
+    # Print what got resolved so the user sees the effective settings
+    # *before* the banner fires (handy for debugging "why no sound?").
+    printf 'Test notification pipeline:\n'
+    printf '    cwd:     %s\n' "$cwd"
+    if [[ -n "$project_name" ]]; then
+        printf '    project: %s\n' "$project_name"
+        local enabled sound
+        enabled=$(config_get_notifications_enabled "$project_name" 2>/dev/null || printf 'true')
+        sound=$(config_get_notifications_sound "$project_name" 2>/dev/null || printf '')
+        printf '    enabled: %s' "$enabled"
+        if [[ "$enabled" == "false" ]]; then
+            printf '  (banner will be suppressed — project has opted out)'
+        fi
+        printf '\n'
+        if [[ -n "$sound" ]]; then
+            printf '    sound:   %s\n' "$sound"
+        else
+            printf '    sound:   (none — silent)\n'
+        fi
+    else
+        printf '    project: (no match — hook will emit a plain banner, no click-to-switch)\n'
+    fi
+    printf '    message: %s\n' "$message"
+    printf '\nFiring hook...\n'
+
+    # Build a JSON payload matching Claude Code's Notification schema.
+    # Using jq to get proper escaping for the message/cwd fields.
+    local payload
+    payload=$(jq -n \
+        --arg cwd "$cwd" \
+        --arg msg "$message" \
+        '{
+            hook_event_name: "Notification",
+            cwd: $cwd,
+            message: $msg,
+            notification_type: "idle_prompt",
+            session_id: "tms-test"
+        }')
+
+    printf '%s' "$payload" | cmd_notify_hook
+    local rc=$?
+
+    printf 'Hook returned exit=%d. Banner should appear within a second.\n' "$rc"
+    printf 'If nothing appears, check the diagnostic log:\n    %s\n' "$(notify_log_path)"
+}
+
 # --- install / uninstall hooks -------------------------------------------
+
+# _resolve_write_target <path>
+#
+# If <path> is a symlink, resolve it (following chains) and print the
+# real file location. Otherwise print <path> unchanged. Used before
+# atomic `.tmp` writes so that `mv .tmp real-file` updates the real
+# target of a symlinked config instead of replacing the symlink itself
+# with the tmp file.
+#
+# `mv tmp.json dest.json` when dest.json is a symlink replaces the
+# symlink with tmp.json (POSIX rename semantics on symlinks). Users who
+# manage ~/.claude/settings.json as a symlink to a dotfiles repo end up
+# with their dotfiles disconnected. Pre-resolve the symlink so the write
+# lands on the dotfiles file and the symlink stays intact.
+_resolve_write_target() {
+    local path="$1"
+    if [[ ! -L "$path" ]]; then
+        printf '%s\n' "$path"
+        return 0
+    fi
+    # Walk the symlink chain manually so this works on macOS BSD readlink
+    # (which doesn't support -f). Equivalent to `readlink -f` / `realpath`.
+    local current="$path"
+    local hop
+    while [[ -L "$current" ]]; do
+        hop=$(readlink "$current")
+        if [[ "$hop" = /* ]]; then
+            current="$hop"
+        else
+            current="$(cd "$(dirname "$current")" && pwd)/$hop"
+        fi
+    done
+    printf '%s\n' "$current"
+}
+
+# _atomic_write <target> <content>
+#
+# Atomic write via .tmp + mv, resolving <target> through symlinks so
+# symlinked config files (common for dotfiles setups) stay intact.
+_atomic_write() {
+    local target="$1"
+    local content="$2"
+    local real_target
+    real_target=$(_resolve_write_target "$target")
+    local tmp_file="${real_target}.tmp"
+    if ! printf '%s\n' "$content" > "$tmp_file"; then
+        die "failed to write ${real_target}; .tmp preserved at ${tmp_file}."
+    fi
+    if ! mv "$tmp_file" "$real_target"; then
+        die "failed to move ${tmp_file} to ${real_target}; .tmp preserved at ${tmp_file}."
+    fi
+}
 
 # cmd_install_hooks [--uninstall] [--dry-run]
 #
@@ -377,13 +538,7 @@ cmd_install_hooks() {
         # install short-circuits without writing, leaving the on-disk entry
         # pointing at the stale path.
         if [[ "$do_dry_run" == "false" ]]; then
-            local mig_tmp="${settings_file}.tmp"
-            if ! printf '%s\n' "$migrated_json" > "$mig_tmp"; then
-                die "failed to write migrated settings.json; .tmp preserved at ${mig_tmp}."
-            fi
-            if ! mv "$mig_tmp" "$settings_file"; then
-                die "failed to move ${mig_tmp} to ${settings_file}; .tmp preserved at ${mig_tmp}."
-            fi
+            _atomic_write "$settings_file" "$migrated_json"
         fi
         original_json="$migrated_json"
     fi
@@ -445,14 +600,7 @@ _install_hooks_install() {
         return 0
     fi
 
-    # Atomic write
-    local tmp_file="${settings_file}.tmp"
-    if ! printf '%s\n' "$new_json" > "$tmp_file"; then
-        die "failed to write settings.json; .tmp preserved at ${tmp_file}."
-    fi
-    if ! mv "$tmp_file" "$settings_file"; then
-        die "failed to move ${tmp_file} to ${settings_file}; .tmp preserved at ${tmp_file}."
-    fi
+    _atomic_write "$settings_file" "$new_json"
 
     printf '%s\n' "$action_msg"
     _install_hooks_probe "$tms_hook_path"
@@ -489,13 +637,7 @@ _install_hooks_uninstall() {
         return 0
     fi
 
-    local tmp_file="${settings_file}.tmp"
-    if ! printf '%s\n' "$new_json" > "$tmp_file"; then
-        die "failed to write settings.json; .tmp preserved at ${tmp_file}."
-    fi
-    if ! mv "$tmp_file" "$settings_file"; then
-        die "failed to move ${tmp_file} to ${settings_file}; .tmp preserved at ${tmp_file}."
-    fi
+    _atomic_write "$settings_file" "$new_json"
 
     printf 'Removed tms-notify-hook.\n'
 }

@@ -68,6 +68,7 @@ tms list               # Show all projects with status
 tms switch <project>   # Switch the active tmux session to the project (non-interactive)
 tms install            # Bootstrap install (symlink, config, dep hints) — see "Installation"
 tms install-hooks      # Install the Claude Code Notification hook (see below)
+tms test-hooks         # Fire a synthetic notification to verify the full pipeline
 tms help               # Show usage
 ```
 
@@ -191,6 +192,45 @@ projects:
 ```
 
 The visual bell in tmux continues to fire regardless of this setting.
+
+### Notification sound
+
+Configure a macOS system sound to play with each banner. Set once globally (applied to every project) and/or per-project to override or silence.
+
+```yaml
+# Global default — every project inherits this unless it sets its own.
+notifications:
+  sound: "Submarine"   # any macOS system sound name, or "default"
+
+projects:
+  - name: critical-app
+    dir: ~/Projects/critical-app
+    notifications:
+      sound: "Sosumi"   # per-project override
+
+  - name: silent-app
+    dir: ~/Projects/silent-app
+    notifications:
+      sound: ""         # explicit silence (overrides the global default)
+
+  - name: inherits-default
+    dir: ~/Projects/whatever
+    # no sound key → inherits "Submarine"
+```
+
+Sound names are macOS system sounds (case-sensitive): `Basso`, `Blow`, `Bottle`, `Frog`, `Funk`, `Glass`, `Hero`, `Morse`, `Ping`, `Pop`, `Purr`, `Sosumi`, `Submarine`, `Tink`. Use `"default"` for the system default notification sound. Absent field (neither global nor per-project) means silent.
+
+### Testing the pipeline
+
+To verify your notification setup without waiting for Claude Code to fire a real event:
+
+```bash
+tms test-hooks                              # uses current cwd for project resolution
+tms test-hooks --project my-project         # test a specific project's settings
+tms test-hooks --message "custom body"      # custom banner text
+```
+
+Prints the resolved project + settings (enabled, sound) before firing a synthetic Claude Code Notification event through the hook. Useful for confirming sound changes took effect and after `tms install-hooks`.
 
 ### Diagnostic log
 

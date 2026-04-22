@@ -18,6 +18,21 @@
 #     notifications.enabled  — bool, default true. Set to false to suppress
 #                              macOS banners for this project (opt-out). The
 #                              tmux visual bell is unaffected by this flag.
+#     notifications.sound    — string, optional. macOS system sound name
+#                              (e.g. "Submarine", "Glass", "Tink", "Ping",
+#                              "Sosumi") or "default" for the system default.
+#                              Plays when the banner fires. Explicit empty
+#                              string ("") overrides the global default with
+#                              silence. Absent key inherits the global value.
+#
+# Top-level fields (siblings of projects:):
+#   notifications.sound — string, optional. Default sound applied to every
+#                         project that doesn't set its own notifications.sound.
+#                         Same value format as above.
+
+# Example: set a default sound for every project.
+notifications:
+  sound: "Submarine"
 
 projects:
   - name: my-webapp
@@ -42,3 +57,13 @@ projects:
     dir: ~/Projects/quiet-project
     notifications:
       enabled: false   # suppress macOS banners for this project; tmux visual bell still fires
+
+  - name: critical-app
+    dir: ~/Projects/critical-app
+    notifications:
+      sound: "Sosumi"  # louder per-project override (takes priority over the global "Submarine")
+
+  - name: silent-override
+    dir: ~/Projects/silent-override
+    notifications:
+      sound: ""        # explicit silence, overrides the global default sound
