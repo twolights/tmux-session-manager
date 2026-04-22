@@ -57,6 +57,35 @@ $EDITOR ~/.config/tmux-session-manager/projects.yml
 
 Key bindings are loaded automatically when you run `tms start` — no `.tmux.conf` modification needed. Bindings only activate in tms-managed sessions.
 
+### Shell completion (optional)
+
+Tab-completion is provided for both bash and zsh. It completes subcommands, project names (for `start`/`stop`/`switch`/`test-hooks --project`), and flags.
+
+**bash**:
+
+```bash
+mkdir -p ~/.local/share/bash-completion/completions
+ln -sf "$(pwd)/completion/tms.bash" ~/.local/share/bash-completion/completions/tms
+```
+
+Then restart your shell or `source ~/.bashrc`. Requires the `bash-completion` package (most systems have it; `brew install bash-completion` on macOS if not).
+
+**zsh**:
+
+```bash
+mkdir -p ~/.zsh/completions
+ln -sf "$(pwd)/completion/_tms" ~/.zsh/completions/_tms
+```
+
+Add this to your `~/.zshrc` *before* `compinit` runs (if the `fpath` line isn't already there):
+
+```zsh
+fpath=(~/.zsh/completions $fpath)
+autoload -Uz compinit && compinit
+```
+
+Then restart your shell. The zsh completions include descriptions for each subcommand and flag.
+
 ## Usage
 
 ### CLI commands

@@ -1,0 +1,78 @@
+#compdef tms
+# zsh completion for tms
+#
+# Install:
+#   mkdir -p ~/.zsh/completions
+#   ln -sf "$(pwd)/completion/_tms" ~/.zsh/completions/_tms
+#
+# Then ensure your ~/.zshrc has (before `compinit`):
+#   fpath=(~/.zsh/completions $fpath)
+#   autoload -Uz compinit && compinit
+
+# Print project names from projects.yml. Plain sed rather than yq to
+# keep tab completion responsive (Python-yq has a ~200ms startup).
+# Matches exactly 2 leading spaces + "- name:" so that server entries
+# (at 6-space indent inside `servers:`) don't show up.
+_tms_project_names() {
+    local config="${TMS_CONFIG_DIR:-$HOME/.config/tmux-session-manager}/projects.yml"
+    [[ -f "$config" ]] || return 0
+    sed -n 's/^  - name:[[:space:]]*\([^[:space:]]*\).*/\1/p' "$config"
+}
+
+_tms_projects() {
+    local -a projects
+    projects=(${(f)"$(_tms_project_names)"})
+    _describe 'project' projects
+}
+
+_tms_subcommands() {
+    local -a commands
+    commands=(
+        'start:launch or attach to a project workspace'
+        'stop:stop a project session'
+        'list:list all projects and their status'
+        'switch:switch active tmux session to a project'
+        'install:bootstrap install (symlink, config, dep hints)'
+        'install-hooks:install or remove Claude Code Notification hook'
+        'test-hooks:fire a synthetic notification to test the pipeline'
+        'help:show usage'
+    )
+    _describe 'command' commands
+}
+
+_tms() {
+    local curcontext="$curcontext" state line
+    typeset -A opt_args
+
+    _arguments -C \
+        '1: :_tms_subcommands' \
+        '*:: :->args'
+
+    case "$state" in
+        args)
+            case "$line[1]" in
+                start|stop|switch)
+                    _arguments '1: :_tms_projects'
+                    ;;
+                install)
+                    _arguments \
+                        '--prefix=[install prefix (default ~/.local/bin)]:directory:_directories' \
+                        '--uninstall[remove symlink; preserves projects.yml]' \
+                        '--dry-run[preview without writing]'
+                    ;;
+                install-hooks)
+                    _arguments \
+                        '--uninstall[remove the hook from ~/.claude/settings.json]' \
+                        '--dry-run[preview diff without writing]'
+                    ;;
+                test-hooks)
+                    _arguments \
+                        '--message[custom banner body]:message:' \
+                        '--project[target project (bypasses cwd)]:project:_tms_projects'
+                    ;;
+            esac
+            ;;
+    esac
+}
+
+_tms "$@"
