@@ -220,15 +220,61 @@ cmd_notify_hook() (
         exit 0
     fi
 
-    # --- config load ---
-    if ! config_load 2>/dev/null; then
+    # --- config load (lite — no full validation) ---
+    # Hot path: full `config_load` does ~5N yq calls for per-project
+    # validation and is the single biggest contributor to hook latency.
+    # `config_load_lite` only sets CONFIG_FILE + verifies syntax
+    # (~2 yq calls). The config is assumed well-formed at hook fire time
+    # (other entry points like `tms start`/`list` run full validation
+    # and would have caught issues earlier).
+    if ! config_load_lite 2>/dev/null; then
         notify_log_failure "no-project-match" "-" "$notification_type" "$session_id" "config load failed; cwd=$cwd"
         exit 0
     fi
 
+    # --- fast project resolution + notification settings (single yq call) ---
+    # The previous implementation made ~80 yq calls across
+    # notify_resolve_project_from_cwd + config_get_notifications_enabled
+    # + config_get_notifications_sound (each doing per-project
+    # _config_project_index iteration). At ~60ms per Python-yq startup,
+    # that was 5+ seconds synchronous work in the hot path — blocking
+    # Claude Code's interaction loop and violating SC-005 (<100ms p95
+    # overhead). This fast path issues exactly TWO yq calls regardless
+    # of project count, does the cwd match in bash, and lives within
+    # the SC-005 budget.
+    local projects_data global_sound
+    projects_data=$(yq -r '.projects[]? | "\(.name)\t\(.dir)\t\(.notifications.enabled // true)\t\(.notifications.sound // "__ABSENT__")"' "$CONFIG_FILE" 2>/dev/null)
+    global_sound=$(yq -r '.notifications.sound // ""' "$CONFIG_FILE" 2>/dev/null)
+    # yq returns "null" as the literal string when the global .notifications.sound key is absent.
+    [[ "$global_sound" == "null" ]] && global_sound=""
+
+    local norm_cwd
+    if [[ -d "$cwd" ]]; then
+        norm_cwd=$(cd "$cwd" 2>/dev/null && pwd -P) || norm_cwd="$cwd"
+    else
+        norm_cwd="$cwd"
+    fi
+
+    local project_name="" proj_enabled="true" proj_sound_raw="__ABSENT__"
+    local _pname _pdir _penabled _psound _expanded _norm_dir
+    while IFS=$'\t' read -r _pname _pdir _penabled _psound; do
+        [[ -z "$_pname" ]] && continue
+        _expanded=$(expand_path "$_pdir")
+        if [[ -d "$_expanded" ]]; then
+            _norm_dir=$(cd "$_expanded" 2>/dev/null && pwd -P) || _norm_dir="$_expanded"
+        else
+            _norm_dir="$_expanded"
+        fi
+        if [[ "$norm_cwd" == "$_norm_dir" ]] || [[ "$norm_cwd" == "$_norm_dir/"* ]]; then
+            project_name="$_pname"
+            proj_enabled="$_penabled"
+            proj_sound_raw="$_psound"
+            break
+        fi
+    done <<< "$projects_data"
+
     # --- no-project-match branch ---
-    local project_name=""
-    if ! project_name=$(notify_resolve_project_from_cwd "$cwd"); then
+    if [[ -z "$project_name" ]]; then
         if command -v alerter >/dev/null 2>&1; then
             ( alerter --title "Claude Code" --message "${message:-Claude Code needs attention.}" --timeout 30 >/dev/null 2>&1 ) &
             disown 2>/dev/null || true
@@ -238,9 +284,7 @@ cmd_notify_hook() (
     fi
 
     # --- per-project opt-out ---
-    local enabled
-    enabled=$(config_get_notifications_enabled "$project_name" 2>/dev/null || echo "true")
-    if [[ "$enabled" == "false" ]]; then
+    if [[ "$proj_enabled" == "false" ]]; then
         exit 0
     fi
 
@@ -260,12 +304,16 @@ cmd_notify_hook() (
     local log_path
     log_path=$(notify_log_path)
 
-    # Resolve the notification sound (per-project → global → silent).
-    # If non-empty, pass to alerter via --sound. alerter accepts macOS
-    # system sound names (Basso, Glass, Submarine, Tink, etc.) or
-    # "default" for the system notification sound.
+    # Resolve the notification sound: project-level present → use it
+    # (empty string = explicit silence override); project-level absent
+    # → fall back to global sound. Precedence matches the per-project
+    # accessor we used before the fast-path rewrite.
     local notif_sound=""
-    notif_sound=$(config_get_notifications_sound "$project_name" 2>/dev/null || printf '')
+    if [[ "$proj_sound_raw" != "__ABSENT__" ]]; then
+        notif_sound="$proj_sound_raw"
+    else
+        notif_sound="$global_sound"
+    fi
 
     # --- emit notification + dispatch click in a detached subshell ---
     # alerter blocks until user interaction or --timeout, then prints the
