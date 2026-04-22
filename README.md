@@ -27,19 +27,35 @@ Each project gets a tmux session with:
 ```bash
 # 1. Clone the repo
 git clone https://github.com/your-user/claude-code-tmux-manager.git
+cd claude-code-tmux-manager
 
-# 2. Add tms to your PATH
-ln -s /path/to/claude-code-tmux-manager/bin/tms ~/.local/bin/tms
+# 2. Bootstrap everything with one command
+./bin/tms install
 
-# 3. Create your config
-mkdir -p ~/.config/tmux-session-manager
-cp /path/to/claude-code-tmux-manager/config/projects.example.yml \
-   ~/.config/tmux-session-manager/projects.yml
-
-# 4. Edit projects.yml with your projects (see Configuration below)
+# 3. Edit your projects (see Configuration below)
+$EDITOR ~/.config/tmux-session-manager/projects.yml
 ```
 
-Key bindings are loaded automatically when you run `tms start` -- no `.tmux.conf` modification needed. Bindings only activate in tms-managed sessions.
+`tms install` does three things:
+
+1. Symlinks `bin/tms` into `~/.local/bin/` (override with `--prefix=<dir>`).
+2. Creates `~/.config/tmux-session-manager/projects.yml` from the bundled example *if* you don't already have one — never overwrites existing config.
+3. Detects your OS and prints install commands for any missing dependencies:
+   - **macOS**: `brew install tmux fzf` etc.
+   - **Linux**: auto-detects apt/dnf/pacman/zypper/apk and prints the matching command (e.g. `sudo apt install tmux`).
+   - Other: generic "install via your package manager" hints.
+
+`tms install` is idempotent — run it again after moving the repo (it updates the symlink in place) or to re-check your dependency list.
+
+```bash
+./bin/tms install --dry-run      # preview without writing anything
+./bin/tms install --uninstall    # remove the symlink (preserves your projects.yml)
+./bin/tms install --prefix=~/bin # install to a different prefix
+```
+
+> **Note on Python yq**: tms uses the Python-based `yq` (kislyuk), not the Go-based `mikefarah/yq` that most distros ship as `yq`. `tms install` always recommends `pip3 install yq` regardless of platform for this reason.
+
+Key bindings are loaded automatically when you run `tms start` — no `.tmux.conf` modification needed. Bindings only activate in tms-managed sessions.
 
 ## Usage
 
@@ -50,6 +66,7 @@ tms start <project>    # Launch or attach to a project workspace
 tms stop <project>     # Stop a project session
 tms list               # Show all projects with status
 tms switch <project>   # Switch the active tmux session to the project (non-interactive)
+tms install            # Bootstrap install (symlink, config, dep hints) — see "Installation"
 tms install-hooks      # Install the Claude Code Notification hook (see below)
 tms help               # Show usage
 ```
@@ -156,6 +173,10 @@ tms install-hooks
 `tms install-hooks` writes the hook entry to `~/.claude/settings.json` and fires a test banner to confirm macOS notification permissions are granted. If macOS prompts you to allow notifications for **Terminal**, click **Allow** (alerter delivers under Terminal's bundle for macOS 26+ compatibility — see [research notes](specs/002-claude-notification-hook/research.md#6-macos-26-compatibility-sender-bundle-override)). If you miss the prompt or the banner doesn't appear, open **System Settings → Notifications → Terminal** and enable notifications there.
 
 Re-running `tms install-hooks` is idempotent. To remove the hook: `tms install-hooks --uninstall`.
+
+#### Upgrading from an earlier install
+
+Previously, the Notification hook was registered as a separate `bin/tms-notify-hook` binary. It's now a subcommand on the main `tms` binary (`tms notify-hook`). When you re-run `tms install-hooks` after pulling this change, it transparently rewrites any stale entry in `~/.claude/settings.json` and prints `Migrated tms-notify-hook entry to tms notify-hook.` once. After that, you can remove any manual `~/.local/bin/tms-notify-hook` symlink you may have created — it's no longer needed (the repo's `bin/tms-notify-hook` has been removed).
 
 ### Per-project opt-out
 

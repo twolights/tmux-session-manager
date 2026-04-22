@@ -2,8 +2,21 @@
 # tms — tmux session manager for Claude Code & neovim workspaces
 set -euo pipefail
 
-# Resolve script directory to find lib/
-TMS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Resolve script directory to find lib/. Follows symlinks so this works
+# when invoked via a symlink on $PATH (e.g. ~/.local/bin/tms from
+# `tms install`) — plain dirname $BASH_SOURCE would resolve the symlink's
+# directory, not the real script's directory.
+_tms_src="${BASH_SOURCE[0]}"
+while [[ -L "$_tms_src" ]]; do
+    _tms_link="$(readlink "$_tms_src")"
+    if [[ "$_tms_link" = /* ]]; then
+        _tms_src="$_tms_link"
+    else
+        _tms_src="$(dirname "$_tms_src")/$_tms_link"
+    fi
+done
+TMS_DIR="$(cd "$(dirname "$_tms_src")/.." && pwd)"
+unset _tms_src _tms_link
 
 # Source library modules
 source "$TMS_DIR/lib/utils.sh"
@@ -11,13 +24,11 @@ source "$TMS_DIR/lib/config.sh"
 source "$TMS_DIR/lib/session.sh"
 source "$TMS_DIR/lib/servers.sh"
 source "$TMS_DIR/lib/notify.sh"
+source "$TMS_DIR/lib/install.sh"
 
-# Check dependencies
-require_cmd tmux
-require_cmd yq
-require_cmd fzf
-
-# Check tmux version (3.2+ required for display-popup)
+# Check tmux version (3.2+ required for display-popup). Called by
+# _require_runtime_deps; not run at source-time because the `install` and
+# `help` subcommands must work on fresh machines that don't yet have tmux.
 _check_tmux_version() {
     local version
     version=$(tmux -V | sed 's/[^0-9.]//g')
@@ -29,7 +40,15 @@ _check_tmux_version() {
     fi
 }
 
-_check_tmux_version
+# _require_runtime_deps — called by subcommands that actually exercise the
+# tmux/yq/fzf runtime. Skipped for `install` and `help` so a user on a
+# fresh clone can run `tms install` to discover which deps are missing.
+_require_runtime_deps() {
+    require_cmd tmux
+    require_cmd yq
+    require_cmd fzf
+    _check_tmux_version
+}
 
 usage() {
     cat <<'USAGE'
@@ -40,6 +59,10 @@ Usage:
   tms stop <project>     Stop a project session
   tms list               List all projects and their status
   tms switch <project>   Switch the active tmux session to the project (non-interactive)
+  tms install            Bootstrap tms: symlink bin/tms, copy example config, print dep hints
+                           [--prefix=<dir>]  Install prefix (default ~/.local/bin/)
+                           [--uninstall]     Remove the symlink (preserves config)
+                           [--dry-run]       Preview without writing
   tms install-hooks      Install or remove the Claude Code Notification hook
                            [--uninstall]  Remove the hook
                            [--dry-run]    Preview changes without writing
@@ -57,20 +80,24 @@ shift || true
 case "$cmd" in
     start)
         [[ -z "${1:-}" ]] && die "usage: tms start <project-name>"
+        _require_runtime_deps
         config_load
         cmd_start "$1"
         ;;
     stop)
         [[ -z "${1:-}" ]] && die "usage: tms stop <project-name>"
+        _require_runtime_deps
         config_load
         cmd_stop "$1"
         ;;
     list)
+        _require_runtime_deps
         config_load
         cmd_list
         ;;
     switch)
         [[ -z "${1:-}" ]] && die "usage: tms switch <project-name>"
+        _require_runtime_deps
         # Use the lite loader: switch is a hot path (notification click
         # callback) and full per-project validation is unnecessary here.
         # cmd_switch falls back to _config_validate on lookup miss, so a
@@ -78,8 +105,18 @@ case "$cmd" in
         config_load_lite
         cmd_switch "$1"
         ;;
+    install)
+        # NOTE: no _require_runtime_deps here — this subcommand's job is
+        # to help the user install those deps in the first place.
+        cmd_install "$@"
+        ;;
     install-hooks)
         cmd_install_hooks "$@"
+        ;;
+    notify-hook)
+        # Internal subcommand invoked by Claude Code's Notification hook.
+        # Not documented in usage() — users never type this directly.
+        cmd_notify_hook "$@"
         ;;
     help|-h|--help)
         usage
