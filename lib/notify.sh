@@ -407,6 +407,58 @@ cmd_test_hooks() {
 
 # --- install / uninstall hooks -------------------------------------------
 
+# _resolve_write_target <path>
+#
+# If <path> is a symlink, resolve it (following chains) and print the
+# real file location. Otherwise print <path> unchanged. Used before
+# atomic `.tmp` writes so that `mv .tmp real-file` updates the real
+# target of a symlinked config instead of replacing the symlink itself
+# with the tmp file.
+#
+# `mv tmp.json dest.json` when dest.json is a symlink replaces the
+# symlink with tmp.json (POSIX rename semantics on symlinks). Users who
+# manage ~/.claude/settings.json as a symlink to a dotfiles repo end up
+# with their dotfiles disconnected. Pre-resolve the symlink so the write
+# lands on the dotfiles file and the symlink stays intact.
+_resolve_write_target() {
+    local path="$1"
+    if [[ ! -L "$path" ]]; then
+        printf '%s\n' "$path"
+        return 0
+    fi
+    # Walk the symlink chain manually so this works on macOS BSD readlink
+    # (which doesn't support -f). Equivalent to `readlink -f` / `realpath`.
+    local current="$path"
+    local hop
+    while [[ -L "$current" ]]; do
+        hop=$(readlink "$current")
+        if [[ "$hop" = /* ]]; then
+            current="$hop"
+        else
+            current="$(cd "$(dirname "$current")" && pwd)/$hop"
+        fi
+    done
+    printf '%s\n' "$current"
+}
+
+# _atomic_write <target> <content>
+#
+# Atomic write via .tmp + mv, resolving <target> through symlinks so
+# symlinked config files (common for dotfiles setups) stay intact.
+_atomic_write() {
+    local target="$1"
+    local content="$2"
+    local real_target
+    real_target=$(_resolve_write_target "$target")
+    local tmp_file="${real_target}.tmp"
+    if ! printf '%s\n' "$content" > "$tmp_file"; then
+        die "failed to write ${real_target}; .tmp preserved at ${tmp_file}."
+    fi
+    if ! mv "$tmp_file" "$real_target"; then
+        die "failed to move ${tmp_file} to ${real_target}; .tmp preserved at ${tmp_file}."
+    fi
+}
+
 # cmd_install_hooks [--uninstall] [--dry-run]
 #
 # Install or remove the tms-notify-hook entry in ~/.claude/settings.json.
@@ -478,13 +530,7 @@ cmd_install_hooks() {
         # install short-circuits without writing, leaving the on-disk entry
         # pointing at the stale path.
         if [[ "$do_dry_run" == "false" ]]; then
-            local mig_tmp="${settings_file}.tmp"
-            if ! printf '%s\n' "$migrated_json" > "$mig_tmp"; then
-                die "failed to write migrated settings.json; .tmp preserved at ${mig_tmp}."
-            fi
-            if ! mv "$mig_tmp" "$settings_file"; then
-                die "failed to move ${mig_tmp} to ${settings_file}; .tmp preserved at ${mig_tmp}."
-            fi
+            _atomic_write "$settings_file" "$migrated_json"
         fi
         original_json="$migrated_json"
     fi
@@ -546,14 +592,7 @@ _install_hooks_install() {
         return 0
     fi
 
-    # Atomic write
-    local tmp_file="${settings_file}.tmp"
-    if ! printf '%s\n' "$new_json" > "$tmp_file"; then
-        die "failed to write settings.json; .tmp preserved at ${tmp_file}."
-    fi
-    if ! mv "$tmp_file" "$settings_file"; then
-        die "failed to move ${tmp_file} to ${settings_file}; .tmp preserved at ${tmp_file}."
-    fi
+    _atomic_write "$settings_file" "$new_json"
 
     printf '%s\n' "$action_msg"
     _install_hooks_probe "$tms_hook_path"
@@ -590,13 +629,7 @@ _install_hooks_uninstall() {
         return 0
     fi
 
-    local tmp_file="${settings_file}.tmp"
-    if ! printf '%s\n' "$new_json" > "$tmp_file"; then
-        die "failed to write settings.json; .tmp preserved at ${tmp_file}."
-    fi
-    if ! mv "$tmp_file" "$settings_file"; then
-        die "failed to move ${tmp_file} to ${settings_file}; .tmp preserved at ${tmp_file}."
-    fi
+    _atomic_write "$settings_file" "$new_json"
 
     printf 'Removed tms-notify-hook.\n'
 }
