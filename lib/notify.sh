@@ -495,10 +495,22 @@ cmd_install_hooks() {
 
     local settings_file="$HOME/.claude/settings.json"
     local tms_hook_path
-    # TMS_DIR must be set in the calling context (bin/tms sets it at startup).
-    # Feature 003: command is now `<TMS_DIR>/bin/tms notify-hook` (two tokens
-    # in a single shell string), not the old standalone `bin/tms-notify-hook`.
-    tms_hook_path="${TMS_DIR}/bin/tms notify-hook"
+    # Register the hook command via the `tms install` default symlink
+    # prefix (~/.local/bin/tms) rather than the repo's absolute path.
+    # Rationale: if the user moves the repo, a single `tms install` run
+    # updates the symlink and settings.json stays valid. Claude Code
+    # expands `~/` via its shell-spawning invocation (same pattern as
+    # the pre-existing `~/bin/slack-notify-channel.sh` entries users
+    # typically have alongside). `bin/tms notify-hook` is a two-token
+    # shell string: argv[0]=tms, argv[1]=notify-hook.
+    tms_hook_path='~/.local/bin/tms notify-hook'
+
+    # Warn if the symlink isn't actually set up at the registered path.
+    # Claude Code would silently get ENOENT on the spawn otherwise.
+    local resolved_hook="$HOME/.local/bin/tms"
+    if [[ ! -x "$resolved_hook" ]]; then
+        warn "expected tms symlink at $resolved_hook but did not find an executable there; run 'tms install' first, or settings.json will reference a dangling path."
+    fi
 
     # Read existing settings or start from empty object
     local original_json
