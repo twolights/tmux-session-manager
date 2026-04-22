@@ -148,6 +148,118 @@ notify_resolve_term_bundle() {
     esac
 }
 
+# --- click-to-exact-tab helpers (feature 004) ----------------------------
+#
+# These helpers are called from inside cmd_notify_hook's detached subshell
+# on @CONTENTCLICKED. They identify the exact terminal window+tab hosting
+# the originating tmux session via AppleScript (iTerm2 / Terminal.app
+# only) by matching tmux's `client_tty` against the terminal's per-tab
+# tty property. See specs/004-click-to-exact-tab/.
+
+# _notify_classify_osascript_err <stderr-text>
+#
+# Pure-bash classifier. Maps osascript stderr to one of the discriminator
+# values logged in the `applescript-failed` category. The `no-tty-match`
+# mode is NOT classified here — callers signal it via osascript exit==1
+# with empty stderr.
+_notify_classify_osascript_err() {
+    local stderr_text="$1"
+    case "$stderr_text" in
+        *"not authorized to send Apple events"*|*"-1743"*) printf 'permission-denied' ;;
+        *"execution error"*|*"syntax error"*)               printf 'script-error' ;;
+        *"Can"*"t get"*|*"doesn"*"t understand"*)           printf 'terminal-quit' ;;
+        *)                                                   printf 'osascript-other' ;;
+    esac
+}
+
+# _notify_iterm_applescript
+#
+# Print the iTerm2 AppleScript body. Iterates windows × tabs, matches
+# `tty of current session of tab` against argv[0]; on match, raises the
+# window and selects the tab. Returns 0 on match, 1 on no-match. See
+# specs/004-click-to-exact-tab/contracts/applescript-payloads.md §Payload 1.
+_notify_iterm_applescript() {
+    cat <<'APPLESCRIPT'
+on run argv
+    set target_tty to item 1 of argv
+    tell application "iTerm"
+        activate
+        repeat with w in windows
+            repeat with t in tabs of w
+                tell current session of t
+                    if (tty as text) is equal to target_tty then
+                        tell w to select
+                        tell t to select
+                        return 0
+                    end if
+                end tell
+            end repeat
+        end repeat
+        return 1
+    end tell
+end run
+APPLESCRIPT
+}
+
+# _notify_terminal_app_applescript
+#
+# Print the Terminal.app AppleScript body. Same shape as iTerm2 but with
+# Terminal.app's dialect: `tty` is a property of `tab` directly (not
+# nested under `current session`), and selection uses `set frontmost` /
+# `set selected` rather than `tell to select`. See contracts/applescript-
+# payloads.md §Payload 2. Empirical verification on a real Terminal.app
+# instance is task T010 in the implementation plan.
+_notify_terminal_app_applescript() {
+    cat <<'APPLESCRIPT'
+on run argv
+    set target_tty to item 1 of argv
+    tell application "Terminal"
+        activate
+        repeat with w in windows
+            repeat with t in tabs of w
+                if (tty of t as text) is equal to target_tty then
+                    set frontmost of w to true
+                    set selected of t to true
+                    return 0
+                end if
+            end repeat
+        end repeat
+        return 1
+    end tell
+end run
+APPLESCRIPT
+}
+
+# _notify_dispatch_osascript <body> <target-tty> <project> <ntype> <session-id>
+#
+# Run osascript with the given AppleScript body and target tty as argv[0].
+# On exit 0: return 0 (caller skips fallback `open -b`).
+# On exit 1 with empty stderr: log `applescript-failed no-tty-match`, return 1.
+# On any other failure: classify via _notify_classify_osascript_err, log,
+# return 1. Cleans up its stderr tmpfile in all branches.
+_notify_dispatch_osascript() {
+    local body="$1" target_tty="$2" project="$3" ntype="$4" sid="$5"
+    local tmp
+    tmp="${TMPDIR:-/tmp}/tms-osa-$$.err"
+    local rc=0
+    osascript -e "$body" -- "$target_tty" >/dev/null 2>"$tmp" || rc=$?
+    if [[ "$rc" -eq 0 ]]; then
+        rm -f "$tmp"
+        return 0
+    fi
+    local stderr_text
+    stderr_text=$(cat "$tmp" 2>/dev/null)
+    rm -f "$tmp"
+    local mode
+    if [[ "$rc" -eq 1 ]] && [[ -z "$stderr_text" ]]; then
+        mode="no-tty-match"
+    else
+        mode=$(_notify_classify_osascript_err "$stderr_text")
+    fi
+    notify_log_failure "applescript-failed" "$project" "$ntype" "$sid" "$mode"
+    return 1
+}
+
 # --- notification hook entry point (cmd_notify_hook) --------------------
 
 # cmd_notify_hook — subcommand body for `tms notify-hook`. Called by
@@ -345,7 +457,30 @@ cmd_notify_hook() (
 
         case "$result" in
             @CONTENTCLICKED)
-                open -b "$term_bundle_id" >/dev/null 2>&1 || true
+                # Feature 004: exact-tab selection via AppleScript on
+                # iTerm2 / Terminal.app. Matches tmux client_tty against
+                # the terminal's per-tab tty property. If the dispatch
+                # succeeds, osascript's `activate` already raised the
+                # app — skip the fallback `open -b` to avoid redundant
+                # activation (research.md §8 happy-path optimization).
+                local target_tty="" osa_handled=false osa_body=""
+                target_tty=$(tmux list-clients -t "$project_name" -F '#{client_tty}' 2>/dev/null | head -1)
+                if [[ -n "$target_tty" ]]; then
+                    case "$term_bundle_id" in
+                        com.googlecode.iterm2)
+                            osa_body=$(_notify_iterm_applescript)
+                            _notify_dispatch_osascript "$osa_body" "$target_tty" "$project_name" "$notification_type" "$session_id" && osa_handled=true
+                            ;;
+                        com.apple.Terminal)
+                            osa_body=$(_notify_terminal_app_applescript)
+                            _notify_dispatch_osascript "$osa_body" "$target_tty" "$project_name" "$notification_type" "$session_id" && osa_handled=true
+                            ;;
+                    esac
+                fi
+                if ! $osa_handled; then
+                    open -b "$term_bundle_id" >/dev/null 2>&1 || true
+                fi
+
                 local switch_output=""
                 if ! switch_output=$("$tms_abs_path" switch "$project_name" 2>&1); then
                     # Switch failed (typically: session not running). Log

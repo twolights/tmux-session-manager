@@ -270,11 +270,24 @@ Failed notifications are logged to:
 
 Override the directory with `TMS_STATE_DIR` or `XDG_STATE_HOME`.
 
-### Known limitation — multiple terminal windows
+### Exact tab selection (iTerm2 / Terminal.app)
 
-If you have two or more windows of the same terminal emulator open, clicking the banner foregrounds the application but macOS chooses whichever window was most recently active as the frontmost OS window. The tmux client in any other window *does* get retargeted to the correct project, but it may be hidden behind the frontmost window — cycle windows (⌘\` on macOS) to find it. Single-window users are unaffected.
+On iTerm2 and Terminal.app, clicking a banner selects the exact window + tab hosting the target tmux session (matched by TTY). On first click, macOS will show an Automation permission prompt asking the click-callback shell to control the terminal — click **Allow**. Subsequent clicks are silent and land on the correct tab.
 
-For the full verification recipe, see [`specs/002-claude-notification-hook/quickstart.md`](specs/002-claude-notification-hook/quickstart.md).
+If AppleScript fails for any reason (permission denied, session detached from every tab, terminal quit, etc.), the click falls back to the previous behavior (`open -b` foregrounds the app, tmux session still switches). The failure reason is logged to `notifications.log` under the `applescript-failed` category — tail it if clicks stop landing on the exact tab:
+
+```bash
+tail -1 ~/.local/state/tmux-session-manager/notifications.log
+# → 2026-04-22T…+0800  applescript-failed  my-project  idle_prompt  …  permission-denied
+```
+
+Failure modes: `permission-denied` (grant in System Settings → Privacy & Security → Automation), `no-tty-match` (session detached — expected), `script-error` (report as a bug), `terminal-quit` (cosmetic), `osascript-other` (catchall).
+
+### Known limitation — other terminal emulators
+
+On terminal emulators without AppleScript automation APIs (Ghostty, Alacritty, kitty, WezTerm, etc.), clicking the banner foregrounds the application but macOS chooses whichever window was most recently active as the frontmost OS window. The tmux client does get retargeted to the correct project, but the tab may be hidden behind the frontmost window — cycle windows (⌘\` on macOS) to find it. iTerm2 and Terminal.app users get the exact-tab experience described above.
+
+For the full verification recipe, see [`specs/002-claude-notification-hook/quickstart.md`](specs/002-claude-notification-hook/quickstart.md) and [`specs/004-click-to-exact-tab/quickstart.md`](specs/004-click-to-exact-tab/quickstart.md).
 
 ## License
 
