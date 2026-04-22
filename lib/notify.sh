@@ -276,12 +276,20 @@ cmd_notify_hook() (
     # On dismissal/timeout we exit silently. This is the macOS 26+-
     # compatible click mechanism (terminal-notifier's -execute does not
     # dispatch on recent macOS; see specs/002-.../research.md §7).
+    #
+    # --timeout 0 (no auto-close) so macOS's per-app "Persistent" alert
+    # style preference (System Settings → Notifications → Terminal) is
+    # honored end-to-end. A non-zero --timeout would force-close the
+    # banner after that window, overriding the user's persistence
+    # preference. The tradeoff is that alerter processes stay alive
+    # until the user clicks or dismisses; lightweight by design, bounded
+    # by human notification cadence.
     (
         local result
         local -a alerter_args=(
             --title "$project_name"
             --message "$message"
-            --timeout 60
+            --timeout 0
         )
         if [[ -n "$notif_sound" ]]; then
             alerter_args+=(--sound "$notif_sound")
