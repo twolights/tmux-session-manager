@@ -440,15 +440,22 @@ cmd_notify_hook() (
     # style preference (System Settings → Notifications → Terminal) is
     # honored end-to-end. A non-zero --timeout would force-close the
     # banner after that window, overriding the user's persistence
-    # preference. The tradeoff is that alerter processes stay alive
-    # until the user clicks or dismisses; lightweight by design, bounded
-    # by human notification cadence.
+    # preference. To stop alerter processes from piling up while they
+    # wait (each is a resident AppKit process ~30MB+), we pass
+    # --group "$project_name": delivering a new banner for a project
+    # removes that project's previous banner from Notification Center,
+    # which trips the prior alerter's dismissal poll and makes it exit.
+    # So at most one resident alerter per project survives, instead of
+    # one per notification. The click action (switch to <project>) is
+    # identical across a project's banners anyway, so only the latest is
+    # useful.
     (
         local result
         local -a alerter_args=(
             --title "$project_name"
             --message "$message"
             --timeout 0
+            --group "$project_name"
         )
         if [[ -n "$notif_sound" ]]; then
             alerter_args+=(--sound "$notif_sound")
