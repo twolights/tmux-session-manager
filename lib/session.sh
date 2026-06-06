@@ -51,8 +51,13 @@ session_create() {
     tmux send-keys -t "${session_name}:workspace.1" 'claude --continue' Enter
 
     # Tag the panes by role so `tms switch` can route to the right pane
-    # even after the user swaps or rearranges them. pane_title travels
-    # with the pane across swap-pane / break-pane operations.
+    # even after the user swaps or rearranges them. Use a per-pane user
+    # option (-p) — pane_title looks tempting but Claude Code overrides
+    # it via OSC at runtime (to show the current task), wiping our tag.
+    # @tms_role lives on the pane object, can't be clobbered by OSC, and
+    # travels with swap-pane / break-pane.
+    tmux set-option -pt "${session_name}:workspace.0" @tms_role editor
+    tmux set-option -pt "${session_name}:workspace.1" @tms_role claude
     tmux select-pane -t "${session_name}:workspace.0" -T 'editor'
     tmux select-pane -t "${session_name}:workspace.1" -T 'claude'
 
@@ -130,21 +135,29 @@ cmd_switch() {
     fi
 
     # Always land on workspace window (FR-004) and the Claude Code pane.
-    # Match pane_title case-insensitively against /claude/ — this catches
-    # both our session_create tag ("claude") and Claude Code's own
-    # runtime title ("✳ Claude Code"), so the routing works whether or
-    # not claude is actively running. pane_title also travels with the
-    # pane across swap-pane / break-pane. Falls back to pane 1 (the
-    # session_create default) when nothing matches, then to whatever
-    # tmux naturally focuses.
+    # Primary: per-pane @tms_role option set in session_create. This
+    # survives swap-pane and can't be clobbered by OSC titles (Claude
+    # Code overrides pane_title at runtime to show the current task,
+    # which is why we don't rely on pane_title anymore).
+    #
+    # Fallback: pane_title match — for pre-@tms_role sessions still
+    # running. Will miss panes whose title was already overridden by
+    # Claude Code; restart those sessions (or set @tms_role manually)
+    # to pick up reliable routing.
+    #
+    # If both miss, leave tmux's currently-selected pane alone rather
+    # than forcing pane 1 — the prior pane-1 fallback was actively
+    # wrong whenever the user had swapped panes.
     tmux select-window -t "${project}:workspace"
     local claude_pane
-    claude_pane=$(tmux list-panes -t "${project}:workspace" -F '#{pane_index}	#{pane_title}' 2>/dev/null \
-        | awk -F'\t' 'tolower($2) ~ /claude/ { print $1; exit }')
+    claude_pane=$(tmux list-panes -t "${project}:workspace" -F '#{pane_index}	#{@tms_role}' 2>/dev/null \
+        | awk -F'\t' '$2 == "claude" { print $1; exit }')
+    if [[ -z "$claude_pane" ]]; then
+        claude_pane=$(tmux list-panes -t "${project}:workspace" -F '#{pane_index}	#{pane_title}' 2>/dev/null \
+            | awk -F'\t' 'tolower($2) ~ /claude/ { print $1; exit }')
+    fi
     if [[ -n "$claude_pane" ]]; then
         tmux select-pane -t "${project}:workspace.${claude_pane}" 2>/dev/null || true
-    else
-        tmux select-pane -t "${project}:workspace.1" 2>/dev/null || true
     fi
 }
 
